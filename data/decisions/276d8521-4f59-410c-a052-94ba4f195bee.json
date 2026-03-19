@@ -1,0 +1,68 @@
+{
+  "documentId": "276d8521-4f59-410c-a052-94ba4f195bee",
+  "decisions": [
+    {
+      "pageNumber": 10,
+      "blockId": "0",
+      "start": 3,
+      "end": 85,
+      "text": "urce: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "1",
+      "start": 0,
+      "end": 59,
+      "text": "Case Notes: Prisoner unlocked late due to staff shortage. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "2",
+      "start": 0,
+      "end": 58,
+      "text": "Creation Date: 17/11/2022 Time: 09:05 Staff Name: MORRIS \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "4",
+      "start": 0,
+      "end": 9,
+      "text": "PAGE 13 \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "5",
+      "start": 0,
+      "end": 117,
+      "text": "Case Note \n Date: 16/11/2022 Time: 16:50 \n Source: Prison \n Case Note Type: Alert \n Case Note Sub Type: Made Active \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "6",
+      "start": 0,
+      "end": 135,
+      "text": "Case Notes: Alert Security Transfer. Prisoner assessed as high risk to security of the \nprison. Recommendation for security transfer. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "7",
+      "start": 0,
+      "end": 60,
+      "text": "Creation Date: 16/11/2022 Time: 16:50 Staff Name: SECURITY \n",
+      "action": "redact",
+      "source": "manual"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "documentId": "863d1a41-328e-47ae-8497-8c7883e3db24",
+  "decisions": [
+    {
+      "pageNumber": 0,
+      "blockId": "2",
+      "start": 12,
+      "end": 40,
+      "text": "Date: 28/11/2022 Time: 17:05",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "7",
+      "start": 0,
+      "end": 125,
+      "text": "Case Note \n Date: 27/11/2022 Time: 09:25 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 2,
+      "blockId": "13",
+      "start": 0,
+      "end": 58,
+      "text": "Creation Date: 25/11/2022 Time: 16:40 Staff Name: SECURITY",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 3,
+      "blockId": "0",
+      "start": 29,
+      "end": 33,
+      "text": "Time",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 3,
+      "blockId": "0",
+      "start": 39,
+      "end": 40,
+      "text": "0",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 3,
+      "blockId": "3",
+      "start": 104,
+      "end": 107,
+      "text": ": H",
+      "action": "redact",
+      "source": "manual"
+    }
+  ]
+}

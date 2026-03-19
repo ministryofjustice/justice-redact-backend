@@ -1,0 +1,23 @@
+{
+  "documentId": "b76eedec-d229-4969-8634-38d10e170018",
+  "decisions": [
+    {
+      "pageNumber": 0,
+      "blockId": "1",
+      "start": 14,
+      "end": 24,
+      "text": "Booking No",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "1",
+      "start": 63,
+      "end": 81,
+      "text": "Negative Behaviour",
+      "action": "redact",
+      "source": "manual"
+    }
+  ]
+}

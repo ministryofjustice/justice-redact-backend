@@ -1,0 +1,14 @@
+{
+  "documentId": "9c001bc2-a7c8-4bdd-9377-a34da9d57ca2",
+  "decisions": [
+    {
+      "pageNumber": 0,
+      "blockId": "1",
+      "start": 0,
+      "end": 7,
+      "text": "A6241AC",
+      "action": "redact",
+      "source": "manual"
+    }
+  ]
+}

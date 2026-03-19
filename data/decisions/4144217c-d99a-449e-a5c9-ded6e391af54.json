@@ -1,0 +1,14 @@
+{
+  "documentId": "4144217c-d99a-449e-a5c9-ded6e391af54",
+  "decisions": [
+    {
+      "pageNumber": 12,
+      "blockId": "8",
+      "start": 8,
+      "end": 24,
+      "text": " Date: 14/11/202",
+      "action": "redact",
+      "source": "manual"
+    }
+  ]
+}

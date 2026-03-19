@@ -1,0 +1,779 @@
+{
+  "documentId": "7415b3f0-76d1-47bd-a608-7f28338b102a",
+  "decisions": [
+    {
+      "pageNumber": 0,
+      "blockId": "1",
+      "start": 0,
+      "end": 92,
+      "text": "A6241AC HAWKINS, M \n Booking No. RJ3920 from 18/03/2015 to Active \n Establishment: HMP BLACK",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 0,
+      "blockId": "2",
+      "start": 12,
+      "end": 117,
+      "text": "Date: 28/11/2022 Time: 17:05 \n Source: System \n Case Note Type: Alert \n Case Note Sub Type: Made Active \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 0,
+      "blockId": "3",
+      "start": 0,
+      "end": 113,
+      "text": "Case Notes: Alert Security. Risk to staff. Prisoner has made direct threats towards staff \nwhen challenged. Do no",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 0,
+      "blockId": "6",
+      "start": 0,
+      "end": 169,
+      "text": "Case Notes: Prisoner returned from association wearing visor incorrectly. When \nchallenged became argumentative and stated staff were \u201ctargeting him\u201d. Behaviour \nlogged.",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 0,
+      "blockId": "8",
+      "start": 12,
+      "end": 127,
+      "text": "Date: 28/11/2022 Time: 09:10 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 0,
+      "blockId": "9",
+      "start": 0,
+      "end": 71,
+      "text": "Case Notes: Prisoner unlocked late due to staff redeployment. Informed.",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "1",
+      "start": 0,
+      "end": 136,
+      "text": "Case Note \n Date: 27/11/2022 Time: 19:45 \n Source: Prison \n Case Note Type: Negative Behaviour \n Case Note Sub Type: Behaviour Warning \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "2",
+      "start": 0,
+      "end": 180,
+      "text": "Case Notes: Prisoner Hawkins, Mark A6241AC suspected of bullying another prisoner \non Wing C. Allegedly overheard making threats. Matter passed to custodial violence \nmanagement. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "3",
+      "start": 0,
+      "end": 60,
+      "text": "Creation Date: 27/11/2022 Time: 19:47 Staff Name: HARRISON \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "4",
+      "start": 0,
+      "end": 127,
+      "text": "Case Note \n Date: 27/11/2022 Time: 15:30 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "5",
+      "start": 0,
+      "end": 135,
+      "text": "Case Notes: Target search completed cell C-2-17. No escape pack found. Misc items \nseized incl evidence tag E/44721 and damaged plug. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "6",
+      "start": 0,
+      "end": 55,
+      "text": "Creation Date: 27/11/2022 Time: 15:30 Staff Name: WATTS",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "8",
+      "start": 0,
+      "end": 102,
+      "text": "Case Notes: Prisoner asked to email solicitor. Provided address \nmark.hawkins.fake@justice-mail.test \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 1,
+      "blockId": "9",
+      "start": 0,
+      "end": 54,
+      "text": "Creation Date: 27/11/2022 Time: 09:25 Staff Name: KENT",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 2,
+      "blockId": "1",
+      "start": 0,
+      "end": 143,
+      "text": "Case Notes: Alert Public Protection. Risk to children and risk to females. Information \nnot to be shared with offender. Victim liaison aware. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 2,
+      "blockId": "2",
+      "start": 0,
+      "end": 64,
+      "text": "Creation Date: 26/11/2022 Time: 18:10 Staff Name: SAFEGUARDING \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 2,
+      "blockId": "3",
+      "start": 0,
+      "end": 127,
+      "text": "Case Note \n Date: 26/11/2022 Time: 14:55 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 2,
+      "blockId": "4",
+      "start": 0,
+      "end": 155,
+      "text": "Case Notes: Prisoner stated he is being bullied by others and named two non-\nassociates. Non association updated. Keep separate from A5510AD and A7734AE. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 2,
+      "blockId": "5",
+      "start": 0,
+      "end": 56,
+      "text": "Creation Date: 26/11/2022 Time: 14:55 Staff Name: TURNER",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 3,
+      "blockId": "7",
+      "start": 0,
+      "end": 8,
+      "text": "PAGE 5 \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 3,
+      "blockId": "8",
+      "start": 0,
+      "end": 117,
+      "text": "Case Note \n Date: 24/11/2022 Time: 17:55 \n Source: Prison \n Case Note Type: Alert \n Case Note Sub Type: Made Active \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 3,
+      "blockId": "9",
+      "start": 0,
+      "end": 112,
+      "text": "Case Notes: Alert Security. OCG Nominal. Associations suspected with organised \ncrime group. Not to be shared. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 3,
+      "blockId": "10",
+      "start": 0,
+      "end": 60,
+      "text": "Creation Date: 24/11/2022 Time: 17:55 Staff Name: SECURITY \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 3,
+      "blockId": "11",
+      "start": 0,
+      "end": 125,
+      "text": "Case Note \n Date: 24/11/2022 Time: 15:10 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 4,
+      "blockId": "2",
+      "start": 0,
+      "end": 127,
+      "text": "Case Note \n Date: 24/11/2022 Time: 10:30 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 4,
+      "blockId": "3",
+      "start": 0,
+      "end": 199,
+      "text": "Case Notes: Prisoner provided personal details during application: \n NI No: QQ123456C \n NHS No: 943 476 5919 \n UK phone: 07123 456789 \n Debit card ending 4482 (full number recorded on application). \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 4,
+      "blockId": "4",
+      "start": 0,
+      "end": 54,
+      "text": "Creation Date: 24/11/2022 Time: 10:30 Staff Name: KENT",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 4,
+      "blockId": "9",
+      "start": 0,
+      "end": 127,
+      "text": "Case Note \n Date: 23/11/2022 Time: 14:40 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 4,
+      "blockId": "10",
+      "start": 0,
+      "end": 135,
+      "text": "Case Notes: Prisoner appeared suspiciously calm following earlier incident. Staff noted \nstrange behaviour and prolonged eye contact. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 4,
+      "blockId": "11",
+      "start": 0,
+      "end": 58,
+      "text": "Creation Date: 23/11/2022 Time: 14:40 Staff Name: HARRISON",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 5,
+      "blockId": "0",
+      "start": 0,
+      "end": 127,
+      "text": "Case Note \n Date: 23/11/2022 Time: 09:15 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 5,
+      "blockId": "1",
+      "start": 0,
+      "end": 68,
+      "text": "Case Notes: Prisoner unlocked late due to regime change. Informed. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 5,
+      "blockId": "2",
+      "start": 0,
+      "end": 58,
+      "text": "Creation Date: 23/11/2022 Time: 09:15 Staff Name: DAVIES \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 5,
+      "blockId": "4",
+      "start": 0,
+      "end": 8,
+      "text": "PAGE 7 \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 5,
+      "blockId": "5",
+      "start": 0,
+      "end": 117,
+      "text": "Case Note \n Date: 22/11/2022 Time: 17:10 \n Source: Prison \n Case Note Type: Alert \n Case Note Sub Type: Made Active \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 5,
+      "blockId": "6",
+      "start": 0,
+      "end": 152,
+      "text": "Case Notes: Alert Extremism. Prisoner suspected of holding extremist views linked to \nfar right ideology. Information not to be disclosed to offender. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 5,
+      "blockId": "7",
+      "start": 0,
+      "end": 60,
+      "text": "Creation Date: 22/11/2022 Time: 17:10 Staff Name: SECURITY \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 5,
+      "blockId": "8",
+      "start": 0,
+      "end": 126,
+      "text": "Case Note \n Date: 22/11/2022 Time: 15:05 \n Source: Prison \n Case Note Type: Intelligence \n Case Note Sub Type: Running Comment",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 6,
+      "blockId": "0",
+      "start": 0,
+      "end": 97,
+      "text": "Case Notes: Prisoner attended education. Tutor noted disengagement and \ninappropriate comments. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 6,
+      "blockId": "1",
+      "start": 0,
+      "end": 58,
+      "text": "Creation Date: 22/11/2022 Time: 09:00 Staff Name: TURNER \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 6,
+      "blockId": "3",
+      "start": 0,
+      "end": 8,
+      "text": "PAGE 8 \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 6,
+      "blockId": "4",
+      "start": 0,
+      "end": 117,
+      "text": "Case Note \n Date: 21/11/2022 Time: 16:50 \n Source: Prison \n Case Note Type: Alert \n Case Note Sub Type: Made Active \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 6,
+      "blockId": "5",
+      "start": 0,
+      "end": 85,
+      "text": "Case Notes: Alert Security. High risk escape. Suspicion of attempted escape planning.",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 6,
+      "blockId": "7",
+      "start": 12,
+      "end": 125,
+      "text": "Date: 21/11/2022 Time: 14:10 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 6,
+      "blockId": "11",
+      "start": 0,
+      "end": 69,
+      "text": "Case Notes: Prisoner unlocked. Rubdown search completed. Compliant. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 6,
+      "blockId": "12",
+      "start": 0,
+      "end": 53,
+      "text": "Creation Date: 21/11/2022 Time: 09:05 Staff Name: LEE",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 7,
+      "blockId": "1",
+      "start": 0,
+      "end": 119,
+      "text": "Case Note \n Date: 20/11/2022 Time: 15:30 \n Source: Prison \n Case Note Type: Alert \n Case Note Sub Type: Made Inactive \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 7,
+      "blockId": "2",
+      "start": 0,
+      "end": 89,
+      "text": "Case Notes: Alert Security. OCG Nominal \u2013 Do not share made inactive following \nreview. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 7,
+      "blockId": "3",
+      "start": 0,
+      "end": 60,
+      "text": "Creation Date: 20/11/2022 Time: 15:30 Staff Name: SECURITY \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 7,
+      "blockId": "4",
+      "start": 0,
+      "end": 125,
+      "text": "Case Note \n Date: 20/11/2022 Time: 13:00 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 7,
+      "blockId": "7",
+      "start": 0,
+      "end": 127,
+      "text": "Case Note \n Date: 20/11/2022 Time: 09:10 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 7,
+      "blockId": "8",
+      "start": 0,
+      "end": 43,
+      "text": "Case Notes: Prisoner unlocked. No issues. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 7,
+      "blockId": "9",
+      "start": 0,
+      "end": 58,
+      "text": "Creation Date: 20/11/2022 Time: 09:10 Staff Name: DAVIES \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 7,
+      "blockId": "11",
+      "start": 0,
+      "end": 9,
+      "text": "PAGE 10 \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 7,
+      "blockId": "12",
+      "start": 0,
+      "end": 115,
+      "text": "Case Note \n Date: 19/11/2022 Time: 16:45 \n Source: Prison \n Case Note Type: Alert \n Case Note Sub Type: Made Active",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 8,
+      "blockId": "0",
+      "start": 0,
+      "end": 78,
+      "text": "Case Notes: Alert Arson. History of arson and cell fires. Staff to be aware. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 8,
+      "blockId": "1",
+      "start": 0,
+      "end": 60,
+      "text": "Creation Date: 19/11/2022 Time: 16:45 Staff Name: SECURITY \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 8,
+      "blockId": "2",
+      "start": 0,
+      "end": 128,
+      "text": "Case Note \n Date: 19/11/2022 Time: 14:30 \n Source: Prison \n Case Note Type: Intelligence \n Case Note Sub Type: Running Comment \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 8,
+      "blockId": "3",
+      "start": 0,
+      "end": 119,
+      "text": "Case Notes: VICOM entry added. Prisoner displays manipulative behaviour and may \npose risk to security of the prison. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 8,
+      "blockId": "4",
+      "start": 0,
+      "end": 60,
+      "text": "Creation Date: 19/11/2022 Time: 14:30 Staff Name: SECURITY \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 8,
+      "blockId": "5",
+      "start": 0,
+      "end": 125,
+      "text": "Case Note \n Date: 19/11/2022 Time: 09:00 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 8,
+      "blockId": "9",
+      "start": 0,
+      "end": 117,
+      "text": "Case Note \n Date: 18/11/2022 Time: 16:35 \n Source: Prison \n Case Note Type: Alert \n Case Note Sub Type: Made Active \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 8,
+      "blockId": "10",
+      "start": 0,
+      "end": 161,
+      "text": "Case Notes: Alert Security. Terrorism related concerns. Prisoner suspected of \nexpressing terrorist sympathies during discussions. Do not disclose to offender. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 8,
+      "blockId": "11",
+      "start": 0,
+      "end": 58,
+      "text": "Creation Date: 18/11/2022 Time: 16:35 Staff Name: SECURITY",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 9,
+      "blockId": "0",
+      "start": 0,
+      "end": 179,
+      "text": "Case Notes: Prisoner allegedly overheard discussing previous contact with individuals \nlinked to extremist networks. Comments vague but concerning. Live monitoring \nrecommended. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 9,
+      "blockId": "1",
+      "start": 0,
+      "end": 58,
+      "text": "Creation Date: 18/11/2022 Time: 14:10 Staff Name: SECURITY",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 9,
+      "blockId": "7",
+      "start": 0,
+      "end": 128,
+      "text": "Case Note \n Date: 17/11/2022 Time: 18:05 \n Source: Prison \n Case Note Type: Intelligence \n Case Note Sub Type: Running Comment \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 9,
+      "blockId": "8",
+      "start": 0,
+      "end": 166,
+      "text": "Case Notes: Intelligence suggests prisoner attempting manipulation of staff through \nrepeated complaints and grievances. Pattern consistent with previous behaviour. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 9,
+      "blockId": "9",
+      "start": 0,
+      "end": 60,
+      "text": "Creation Date: 17/11/2022 Time: 18:05 Staff Name: SECURITY \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 9,
+      "blockId": "10",
+      "start": 0,
+      "end": 57,
+      "text": "Case Note \n Date: 17/11/2022 Time: 15:20 \n Source: Prison",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "6",
+      "start": 0,
+      "end": 135,
+      "text": "Case Notes: Alert Security Transfer. Prisoner assessed as high risk to security of the \nprison. Recommendation for security transfer. \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "7",
+      "start": 0,
+      "end": 60,
+      "text": "Creation Date: 16/11/2022 Time: 16:50 Staff Name: SECURITY \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "8",
+      "start": 0,
+      "end": 127,
+      "text": "Case Note \n Date: 16/11/2022 Time: 14:00 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "9",
+      "start": 12,
+      "end": 58,
+      "text": "Prisoner informed transfer under consideration",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 10,
+      "blockId": "11",
+      "start": 20,
+      "end": 102,
+      "text": "/11/2022 Time: 09:10 \n Source: Prison \n Case Note Type: General \n Case Note Sub Ty",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 11,
+      "blockId": "2",
+      "start": 67,
+      "end": 117,
+      "text": "te Type: Alert \n Case Note Sub Type: Made Active \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 11,
+      "blockId": "3",
+      "start": 93,
+      "end": 105,
+      "text": "during unloc",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 11,
+      "blockId": "5",
+      "start": 48,
+      "end": 72,
+      "text": "e: Prison \n Case Note Ty",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 11,
+      "blockId": "6",
+      "start": 12,
+      "end": 36,
+      "text": "Prisoner behaviour incre",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 11,
+      "blockId": "8",
+      "start": 24,
+      "end": 103,
+      "text": "2022 Time: 09:00 \n Source: Prison \n Case Note Type: General \n Case Note Sub Typ",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 11,
+      "blockId": "13",
+      "start": 0,
+      "end": 57,
+      "text": "Case Note \n Date: 14/11/2022 Time: 16:55 \n Source: Prison",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 12,
+      "blockId": "0",
+      "start": 1,
+      "end": 60,
+      "text": "Case Note Type: Alert \n Case Note Sub Type: Made Inactive \n",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 12,
+      "blockId": "3",
+      "start": 0,
+      "end": 80,
+      "text": "Case Note \n Date: 14/11/2022 Time: 13:10 \n Source: Prison \n Case Note Type: Gene",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 12,
+      "blockId": "4",
+      "start": 77,
+      "end": 206,
+      "text": "Address: 12 Market Road, Leeds LS1 4AB \n Phone: 07911 223344 \n Email: mark.hawkins.test@example.co.uk \n Vehicle reg previously de",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 12,
+      "blockId": "1",
+      "start": 0,
+      "end": 136,
+      "text": "Case Notes: Alert Extremism \u2013 Made inactive following review. Concerns remain but \ninsufficient evidence to maintain alert at this time.",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "pageNumber": 12,
+      "blockId": "6",
+      "start": 0,
+      "end": 127,
+      "text": "Case Note \n Date: 14/11/2022 Time: 09:05 \n Source: Prison \n Case Note Type: General \n Case Note Sub Type: History Sheet Entry \n",
+      "action": "redact",
+      "source": "manual"
+    }
+  ]
+}
