@@ -1,14 +1,24 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from uuid import uuid4
-from pathlib import Path
-from typing import Literal
-import shutil
+from __future__ import annotations
+
 import asyncio
 import json
+import shutil
+from pathlib import Path
+from typing import Literal
+from uuid import uuid4
 
-from offender_sar_redaction import detect_for_review, apply_decisions_and_export
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+
+from justice_redact.detection import detect_for_review
+from justice_redact.pdf_handler import extract_document
+from justice_redact.pdf_handler.apply import apply_pdf_decisions
+from justice_redact.pdf_handler.decisions import (
+    ImageRegionDecision,
+    TableTextSpanDecision,
+    TextSpanDecision,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -33,9 +43,10 @@ class ProcessDocumentRequest(BaseModel):
     otherPhrases: str = ""
 
 
-class RedactionDecision(BaseModel):
+class TextRedactionDecision(BaseModel):
+    kind: Literal["text"]
     pageNumber: int
-    blockId: str
+    itemId: str
     start: int
     end: int
     text: str
@@ -43,9 +54,84 @@ class RedactionDecision(BaseModel):
     source: Literal["manual"]
 
 
+class TableRedactionDecision(BaseModel):
+    kind: Literal["table_cell"]
+    pageNumber: int
+    tableId: str
+    cellId: str
+    start: int
+    end: int
+    text: str
+    action: Literal["redact"]
+    source: Literal["manual"]
+
+
+class ImageRedactionDecision(BaseModel):
+    kind: Literal["image"]
+    pageNumber: int
+    imageId: str
+    action: Literal["redact"]
+    source: Literal["manual"]
+
+
+RedactionDecision = (
+    TextRedactionDecision | TableRedactionDecision | ImageRedactionDecision
+)
+
+
 class ApplyRedactionsRequest(BaseModel):
     documentId: str
     decisions: list[RedactionDecision]
+
+
+def _build_pdf_handler_decisions(document_model, decisions: list[RedactionDecision]):
+    typed_decisions = []
+
+    for decision in decisions:
+        if isinstance(decision, TextRedactionDecision):
+            typed_decisions.append(
+                TextSpanDecision(
+                    document_id=document_model.document_id,
+                    page_number=decision.pageNumber,
+                    item_id=decision.itemId,
+                    start=decision.start,
+                    end=decision.end,
+                    text=decision.text,
+                    source=decision.source,
+                    action=decision.action,
+                )
+            )
+            continue
+
+        if isinstance(decision, TableRedactionDecision):
+            typed_decisions.append(
+                TableTextSpanDecision(
+                    document_id=document_model.document_id,
+                    page_number=decision.pageNumber,
+                    table_id=decision.tableId,
+                    cell_id=decision.cellId,
+                    start=decision.start,
+                    end=decision.end,
+                    text=decision.text,
+                    source=decision.source,
+                    action=decision.action,
+                )
+            )
+            continue
+
+        if isinstance(decision, ImageRedactionDecision):
+            typed_decisions.append(
+                ImageRegionDecision(
+                    document_id=document_model.document_id,
+                    page_number=decision.pageNumber,
+                    image_id=decision.imageId,
+                    source=decision.source,
+                    action=decision.action,
+                )
+            )
+            continue
+
+    return typed_decisions
 
 
 @router.post("/upload")
@@ -137,28 +223,50 @@ async def apply_redactions(document_id: str, request: ApplyRedactionsRequest):
     with decisions_path.open("w", encoding="utf-8") as f:
         json.dump(request.model_dump(), f, indent=2)
 
-    pdf_path = str(UPLOAD_DIR / f"{document_id}.pdf")
-    export_path = str(EXPORTS_DIR / f"{document_id}-redacted.pdf")
+    pdf_path = UPLOAD_DIR / f"{document_id}.pdf"
+    export_path = EXPORTS_DIR / f"{document_id}-redacted.pdf"
 
     try:
-        summary = apply_decisions_and_export(
-            pdf_path=pdf_path,
-            decisions=request.model_dump()["decisions"],
-            output_pdf_path=export_path,
+        document_model = extract_document(pdf_path)
+        typed_decisions = _build_pdf_handler_decisions(
+            document_model=document_model,
+            decisions=request.decisions,
         )
+
+        if not typed_decisions:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid redaction decisions could be built",
+            )
+
+        apply_pdf_decisions(
+            document=document_model,
+            pdf_path=pdf_path,
+            decisions=typed_decisions,
+            output_path=export_path,
+        )
+
+        summary = {
+            "totalDecisionsApplied": len(typed_decisions),
+            "decisionTypes": sorted({decision.kind for decision in request.decisions}),
+        }
+
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
     document["status"] = "redaction_complete"
-    document["exportPath"] = export_path
+    document["exportPath"] = str(export_path)
     document["redactionSummary"] = summary
 
     return {
         "documentId": document_id,
         "status": "redaction_complete",
-        "exportPath": export_path,
+        "exportPath": str(export_path),
         "summary": summary,
     }
+
 
 @router.get("/{document_id}/export")
 async def get_document_export(document_id: str):

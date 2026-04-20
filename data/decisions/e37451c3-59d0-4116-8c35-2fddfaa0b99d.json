@@ -1,0 +1,45 @@
+{
+  "documentId": "e37451c3-59d0-4116-8c35-2fddfaa0b99d",
+  "decisions": [
+    {
+      "kind": "text",
+      "pageNumber": 2,
+      "itemId": "doc_001_p0002_i0004",
+      "start": 6,
+      "end": 8,
+      "text": "am",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "kind": "text",
+      "pageNumber": 2,
+      "itemId": "doc_001_p0002_i0004",
+      "start": 16,
+      "end": 17,
+      "text": "O",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "kind": "text",
+      "pageNumber": 2,
+      "itemId": "doc_001_p0002_i0006",
+      "start": 0,
+      "end": 19,
+      "text": "Given Name 2: LEWIS",
+      "action": "redact",
+      "source": "manual"
+    },
+    {
+      "kind": "text",
+      "pageNumber": 2,
+      "itemId": "doc_001_p0002_i0007",
+      "start": 6,
+      "end": 12,
+      "text": "Name 3",
+      "action": "redact",
+      "source": "manual"
+    }
+  ]
+}
