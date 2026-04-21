@@ -1,8 +1,33 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
 .venv/
+venv/
+
+# Environment variables
 .env
+.env.*
+
+# OS / editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Data directories (runtime generated)
 data/uploads/*
 data/processed/*
+data/decisions/*
+data/exports/*
+
+# Keep folder structure
 !data/uploads/.gitkeep
 !data/processed/.gitkeep
+!data/decisions/.gitkeep
+!data/exports/.gitkeep
