@@ -1,16 +1,13 @@
 from __future__ import annotations
-
 import asyncio
 import json
 import shutil
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
-
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-
 from justice_redact.detection import detect_for_review
 from justice_redact.pdf_handler import extract_document
 from justice_redact.pdf_handler.apply import apply_pdf_decisions
