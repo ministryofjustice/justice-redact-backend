@@ -1,12 +1,13 @@
 import asyncio
 from uuid import uuid4
 
-from fastapi import APIRouter, File, UploadFile
-
 from app.models.document_requests import ProcessDocumentRequest
 from app.services.document_processing_service import process_document_pipeline
 from app.services.document_store import create_document_record, get_document_or_404
 from app.services.file_store import save_upload_file, upload_pdf_path
+from pathlib import Path
+from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi.responses import FileResponse
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -45,6 +46,20 @@ async def process_document(document_id: str, request: ProcessDocumentRequest):
         "documentId": document_id,
         "status": "processing",
     }
+
+
+@router.get("/{document_id}/images/{image_id}.png")
+async def get_document_image_preview(document_id: str, image_id: str):
+    image_path = Path("data/processed") / document_id / "images" / f"{image_id}.png"
+
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail="Image preview not found")
+
+    return FileResponse(
+        image_path,
+        media_type="image/png",
+        filename=f"{image_id}.png",
+    )
 
 
 @router.get("/{document_id}/status")
