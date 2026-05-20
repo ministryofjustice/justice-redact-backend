@@ -1,32 +1,87 @@
+name: 'Build, Push & Deploy Backend'
+
 on:
   push:
     branches: [main]
 
 jobs:
-  ecr:
+  ecr_and_deploy:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # This is required for requesting the JWT
-      contents: read  # This is required for actions/checkout
+      id-token: write
+      contents: read
+    
+    env:
+      KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
+
     steps:
-      # Checkout GitHub repository
+      # 1. Checkout GitHub repository
       - uses: actions/checkout@v3
 
-      # Assume role in Cloud Platform
-      - uses: aws-actions/configure-aws-credentials@v2
+      # 2. Configure AWS credentials using OIDC
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
           aws-region: ${{ vars.ECR_REGION }}
 
-      # Login to container repository
-      - uses: aws-actions/amazon-ecr-login@v1
+      # 3. Login to container repository
+      - name: Log into ECR
+        uses: aws-actions/amazon-ecr-login@v1
         id: login-ecr
 
-      # Build and push a Docker image to the container repository
-      - run: |
-          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
-          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+      # 4. Build and push Python Docker image
+      - name: Build & Push to ECR
+        run: |
+          docker build -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
+          docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
         env:
-          REGISTRY: ${{ secrets.ECR_REGISTRY_URL }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: ${{ vars.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
+
+      # 5. Generate Kubernetes manifests
+      - name: Generate Kubernetes manifests
+        run: |
+          sudo apt-get update && sudo apt-get install -y gettext
+          mkdir -p k8s
+
+          export TEAM_NAME=justice-redact
+          export ENVIRONMENT=dev
+          export NAMESPACE="${KUBE_NAMESPACE}" 
+          
+          # Explicitly target the Python tagged container
+          export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
+          export SERVICE_ACCOUNT="${TEAM_NAME}-${ENVIRONMENT}"
+
+          envsubst < deployments/templates/deployment.yml > k8s/deployment.yml
+          envsubst < deployments/templates/service.yml > k8s/service.yml
+          envsubst < deployments/templates/ingress.yml > k8s/ingress.yml
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+          KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
+
+      # 6. Authenticate using Kube Token
+      - name: 'Authenticate to the cluster'
+        env:
+          KUBE_CERT: ${{ secrets.KUBE_CERT }}
+          KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
+          KUBE_CLUSTER: ${{ secrets.KUBE_CLUSTER }}
+        run: |
+          echo "${KUBE_CERT}" > ca.crt
+          kubectl config set-cluster ${KUBE_CLUSTER} --certificate-authority=./ca.crt --server=https://${KUBE_CLUSTER}
+          kubectl config set-credentials deploy-user --token=${KUBE_TOKEN}
+          kubectl config set-context ${KUBE_CLUSTER} --cluster=${KUBE_CLUSTER} --user=deploy-user --namespace=${KUBE_NAMESPACE}
+          kubectl config use-context ${KUBE_CLUSTER}
+
+      # 7. Verify cluster access
+      - name: Verify cluster access
+        run: |
+          kubectl get pods -n ${KUBE_NAMESPACE}
+
+      # 8. Deploy to Kubernetes
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f k8s/ -n ${KUBE_NAMESPACE}

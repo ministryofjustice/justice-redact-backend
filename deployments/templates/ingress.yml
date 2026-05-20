@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: justice-redact-backend
+  namespace: ${NAMESPACE}
+  annotations:
+    external-dns.alpha.kubernetes.io/aws-weight: '100'
+    external-dns.alpha.kubernetes.io/set-identifier: 'justice-redact-backend-${NAMESPACE}-green'
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Extends the timeout windows so long-running machine learning model responses do not drop
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: default-non-prod
+  rules:
+    - host: ${NAMESPACE}.apps.live.cloud-platform.service.justice.gov.uk
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: justice-redact-backend-service
+                port:
+                  number: 80
