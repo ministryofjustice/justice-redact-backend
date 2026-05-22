@@ -59,4 +59,4 @@ USER 2000
 ENTRYPOINT []
 
 # Runs Uvicorn for production serving. Switch to Gunicorn if needed.
-CMD [ "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080" ]
+CMD [ "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080" ]
