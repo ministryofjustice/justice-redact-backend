@@ -18,7 +18,7 @@ spec:
         - name: app
           image: ${IMAGE}
           ports:
-            - containerPort: 8080
+            - containerPort: 3000
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
