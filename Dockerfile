@@ -58,5 +58,8 @@ USER 2000
 
 ENTRYPOINT []
 
+# Tells Python to treat the root directory as a base module pathway
+ENV PYTHONPATH=/app
+
 # Runs Uvicorn for production serving. Switch to Gunicorn if needed.
 CMD [ "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3000" ]
