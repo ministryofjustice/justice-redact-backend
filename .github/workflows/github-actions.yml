@@ -2,11 +2,36 @@ name: 'Build, Push & Deploy Backend'
 
 on:
   push:
-    branches: [main]
+    branches:
+      - dev
+      - main
+      - prod
 
 jobs:
-  ecr_and_deploy:
+  # JOB 1: Determine the target environment dynamically based on the Git branch
+  set-environment:
     runs-on: ubuntu-latest
+    outputs:
+      target_env: ${{ steps.branch-check.outputs.env_name }}
+    steps:
+      - id: branch-check
+        run: |
+          if [ "${{ github.ref_name }}" = "dev" ]; then
+            echo "env_name=dev" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_name }}" = "main" ]; then
+            echo "env_name=staging" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_name }}" = "prod" ]; then
+            echo "env_name=prod" >> $GITHUB_OUTPUT
+          else
+            echo "env_name=dev" >> $GITHUB_OUTPUT
+          fi
+
+  # JOB 2: Build, Push, and Deploy using the dynamic environment context
+  ecr_and_deploy:
+    needs: set-environment
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-environment.outputs.target_env }}
+    
     permissions:
       id-token: write
       contents: read
@@ -16,21 +41,21 @@ jobs:
 
     steps:
       # 1. Checkout GitHub repository
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       # 2. Configure AWS credentials using OIDC
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
           aws-region: ${{ vars.ECR_REGION }}
 
       # 3. Login to container repository
       - name: Log into ECR
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
 
-      # 4. Build and push Python Docker image
+      # 4. Build and push Python Docker image to the shared dev registry
       - name: Build & Push to ECR
         run: |
           docker build -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
@@ -47,12 +72,10 @@ jobs:
           mkdir -p k8s
 
           export TEAM_NAME=justice-redact
-          export ENVIRONMENT=dev
+          export ENVIRONMENT="${{ needs.set-environment.outputs.target_env }}"
           export NAMESPACE="${KUBE_NAMESPACE}" 
-          
-          # Explicitly target the Python tagged container
           export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
-          export SERVICE_ACCOUNT="${TEAM_NAME}-${ENVIRONMENT}"
+          export SERVICE_ACCOUNT="cd-serviceaccount"
 
           envsubst < deployments/templates/deployment.yml > k8s/deployment.yml
           envsubst < deployments/templates/service.yml > k8s/service.yml
