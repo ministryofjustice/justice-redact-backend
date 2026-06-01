@@ -44,47 +44,69 @@ jobs:
       - uses: actions/checkout@v4
 
       # 2. Configure AWS credentials using OIDC
+      # 💡 Fix: If target environment is staging, assume the Dev IAM role instead
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
-          aws-region: ${{ vars.ECR_REGION }}
+          role-to-assume: ${{ needs.set-environment.outputs.target_env == 'staging' && secrets.ECR_ROLE_TO_ASSUME_DEV || secrets.ECR_ROLE_TO_ASSUME }}
+          aws-region: ${{ needs.set-environment.outputs.target_env == 'staging' && 'eu-west-2' || vars.ECR_REGION }}
 
       # 3. Login to container repository
       - name: Log into ECR
         uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
 
-      # 4. Build and push Python Docker image to the shared dev registry
+      # 4. Build and push a Docker image to the shared dev registry
+      # 💡 Fix: If target environment is staging, push directly to the dev ECR path
       - name: Build & Push to ECR
         run: |
-          docker build -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
-          docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
+          CLEAN_REPO=$(echo "$REPOSITORY" | sed 's|^justice-redact/||')
+          docker build -t $REGISTRY/$CLEAN_REPO:backend-$IMAGE_TAG .
+          docker push $REGISTRY/$CLEAN_REPO:backend-$IMAGE_TAG
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          REPOSITORY: ${{ needs.set-environment.outputs.target_env == 'staging' && 'justice-redact/justice-redact-dev' || vars.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
 
-      # 5. Generate Kubernetes manifests
+      # 5. Generate Kubernetes manifests dynamically with environment folder mapping
+      # 💡 Fix: Dynamic folder identification pointing to deployments/templates as default fallback
       - name: Generate Kubernetes manifests
         run: |
           sudo apt-get update && sudo apt-get install -y gettext
           mkdir -p k8s
 
-          export TEAM_NAME=justice-redact
+          if [ "${{ needs.set-environment.outputs.target_env }}" = "dev" ]; then
+            export ENV_FOLDER="development"
+          elif [ "${{ needs.set-environment.outputs.target_env }}" = "staging" ]; then
+            export ENV_FOLDER="staging"
+          else
+            export ENV_FOLDER="production"
+          fi
+
+          CLEAN_REPO=$(echo "$REPOSITORY" | sed 's|^justice-redact/||')
           export ENVIRONMENT="${{ needs.set-environment.outputs.target_env }}"
-          export NAMESPACE="${KUBE_NAMESPACE}" 
-          export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
+          export TEAM_NAME=justice-redact
+          export IMAGE="${REGISTRY}/${CLEAN_REPO}:backend-${IMAGE_TAG}"
           export SERVICE_ACCOUNT="cd-serviceaccount"
 
-          envsubst < deployments/templates/deployment.yml > k8s/deployment.yml
-          envsubst < deployments/templates/service.yml > k8s/service.yml
-          envsubst < deployments/templates/ingress.yml > k8s/ingress.yml
+          echo "=== Current working directory structure ==="
+          ls -R deployments/ || echo "deployments directory not found!"
+
+          if [ -d "deployments/${ENV_FOLDER}" ]; then
+            echo "Using target environment templates from: deployments/${ENV_FOLDER}"
+            export TEMPLATE_DIR="deployments/${ENV_FOLDER}"
+          else
+            echo "⚠️ Warning: deployments/${ENV_FOLDER} not found! Falling back to templates in: deployments/templates"
+            export TEMPLATE_DIR="deployments/templates"
+          fi
+
+          envsubst < ${TEMPLATE_DIR}/deployment.yml > k8s/deployment.yml
+          envsubst < ${TEMPLATE_DIR}/service.yml > k8s/service.yml
+          envsubst < ${TEMPLATE_DIR}/ingress.yml > k8s/ingress.yml
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          REPOSITORY: ${{ needs.set-environment.outputs.target_env == 'staging' && 'justice-redact/justice-redact-dev' || vars.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
-          KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
 
       # 6. Authenticate using Kube Token
       - name: 'Authenticate to the cluster'
