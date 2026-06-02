@@ -4,8 +4,8 @@ on:
   push:
     branches:
       - dev
-      - staging
-      - main
+      - staging  # 🔄 Added staging branch
+      - main     # 🚀 main is now your Production branch!
 
 jobs:
   # JOB 1: Determine the target environment dynamically based on the Git branch
@@ -18,9 +18,9 @@ jobs:
         run: |
           if [ "${{ github.ref_name }}" = "dev" ]; then
             echo "env_name=dev" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "main" ]; then
+          elif [ "${{ github.ref_name }}" = "staging" ]; then
             echo "env_name=staging" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "prod" ]; then
+          elif [ "${{ github.ref_name }}" = "main" ]; then
             echo "env_name=prod" >> $GITHUB_OUTPUT
           else
             echo "env_name=dev" >> $GITHUB_OUTPUT
@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # 2. Configure AWS credentials using OIDC
-      # Fall back to the global Dev IAM role secret when building/pushing on the staging (main) branch
+      # Fall back to the global Dev IAM role secret when building/pushing on the staging branch
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
