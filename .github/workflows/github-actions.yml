@@ -37,48 +37,48 @@ jobs:
   ecr_and_deploy:
     needs: set-environment
     runs-on: ubuntu-latest
-    # Only bind to a specific GitHub Environment context on direct pushes, not PRs
-    environment: ${{ github.event_name == 'pull_request' && '' || needs.set-environment.outputs.target_env }}
+    # Only bind to an environment context on valid target branch pushes
+    environment: ${{ (github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')) && needs.set-environment.outputs.target_env || '' }}
 
     steps:
       # 1. Checkout Application Code
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Configure AWS credentials via OIDC (Skipped on PRs due to Cloud Platform Trust Policies)
+      # 2. Configure AWS credentials via OIDC (Only runs on direct pushes to dev/staging/main)
       - name: Configure AWS credentials
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
         uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
           aws-region: eu-west-2
 
-      # 3. Log into Amazon ECR (Skipped on PRs)
+      # 3. Log into Amazon ECR (Only runs on direct pushes to dev/staging/main)
       - name: Login to Amazon ECR
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 4. Build Docker Image (Local verification for PRs, Remote Push for Merges)
+      # 4. Build Docker Image (Local verification for PRs/feature branches, Remote Push for Merges)
       - name: Build, tag, and push image to Amazon ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: justice-redact-backend
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "📊 PR Detected: Validating image build stability locally..."
-            docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
-            echo "✅ Local compilation successful! Skipping ECR registry push for security."
-          else
-            echo "🚀 Branch Push Detected: Delivering image to AWS ECR..."
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "dev" -o "${{ github.ref_name }}" = "staging" -o "${{ github.ref_name }}" = "main" ]; then
+            echo "🚀 Deployment Target Branch Detected: Delivering image to AWS ECR..."
             docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
             docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          else
+            echo "📊 Feature Branch / PR Detected: Validating image build stability locally..."
+            docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+            echo "✅ Local compilation successful! Skipping ECR registry push for security."
           fi
 
-      # 5. Authenticate & Deploy to Kubernetes Cluster (Skipped on PRs)
+      # 5. Authenticate & Deploy to Kubernetes Cluster (Only runs on direct pushes to dev/staging/main)
       - name: Deploy to Cloud Platform Kubernetes Cluster
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
         uses: bitovi/github-actions-deploy-eks-helm@v1.2.8
         with:
           name: justice-redact-backend
