@@ -1,119 +1,35 @@
-name: 'Build, Push & Deploy Backend'
-
-on:
-  push:
-    branches:
-      - dev
-      - staging  # 🔄 Added staging branch
-      - main     # 🚀 main is now our Production branch!
-
-jobs:
-  # JOB 1: Determine the target environment dynamically based on the Git branch
-  set-environment:
-    runs-on: ubuntu-latest
-    outputs:
-      target_env: ${{ steps.branch-check.outputs.env_name }}
-    steps:
-      - id: branch-check
-        run: |
-          if [ "${{ github.ref_name }}" = "dev" ]; then
-            echo "env_name=dev" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "staging" ]; then
-            echo "env_name=staging" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "main" ]; then
-            echo "env_name=prod" >> $GITHUB_OUTPUT
-          else
-            echo "env_name=dev" >> $GITHUB_OUTPUT
-          fi
-
-  # JOB 2: Build, Push, and Deploy using the dynamic environment context
-  ecr_and_deploy:
-    needs: set-environment
-    runs-on: ubuntu-latest
-    # Only bind to a GitHub Environment if it's a direct branch push, not a PR
-    environment: ${{ github.event_name == 'pull_request' && '' || needs.set-environment.outputs.target_env }}
-    
-    permissions:
-      id-token: write
-      contents: read
-    
-    env:
-      KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
-
-    steps:
-      # 1. Checkout GitHub repository
-      - uses: actions/checkout@v4
-
-      # 2. Configure AWS credentials using OIDC
-      # Fall back to the global Dev IAM role secret when building/pushing on the staging branch
+# 2. Configure AWS credentials using OIDC (Skipped on PRs to prevent AssumeRole errors)
       - name: Configure AWS credentials
+        if: github.event_name != 'pull_request'
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ needs.set-environment.outputs.target_env == 'staging' && secrets.ECR_ROLE_TO_ASSUME || secrets.ECR_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
           aws-region: ${{ needs.set-environment.outputs.target_env == 'staging' && 'eu-west-2' || vars.ECR_REGION }}
 
-      # 3. Login to container repository
-      - name: Log into ECR
-        uses: aws-actions/amazon-ecr-login@v2
+      # 3. Log into Amazon ECR (Skipped on PRs)
+      - name: Login to Amazon ECR
+        if: github.event_name != 'pull_request'
         id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      # 4. Build and push Python Docker image to the shared dev registry
-      # Preserves the explicit 'team/namespace' string matching path required by MoJ ECR IAM policies
-      - name: Build & Push to ECR
-        run: |
-          docker build -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
-          docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
+      # 4. Build the image (Local-only for PRs, Builds & Pushes for branch merges)
+      - name: Build, tag, and push image to Amazon ECR
         env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: ${{ needs.set-environment.outputs.target_env == 'staging' && 'justice-redact/justice-redact-dev' || vars.ECR_REPOSITORY }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: justice-redact-backend
           IMAGE_TAG: ${{ github.sha }}
-
-      # 5. Generate Kubernetes manifests from templates
-      - name: Generate Kubernetes manifests
         run: |
-          sudo apt-get update && sudo apt-get install -y gettext
-          mkdir -p k8s
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "📊 PR Detected: Building Docker image locally to verify compilation stability..."
+            docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+            echo "✅ Local build successful! Skipping ECR push for PR security."
+          else
+            echo "🚀 Branch Push Detected: Building and pushing to AWS ECR registry..."
+            docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+            docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          fi
 
-          export TEAM_NAME=justice-redact
-          export ENVIRONMENT="${{ needs.set-environment.outputs.target_env }}"
-          export NAMESPACE="${KUBE_NAMESPACE}" 
-          export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
-          export SERVICE_ACCOUNT="cd-serviceaccount"
-
-          envsubst < deployments/templates/deployment.yml > k8s/deployment.yml
-          envsubst < deployments/templates/service.yml > k8s/service.yml
-          envsubst < deployments/templates/ingress.yml > k8s/ingress.yml
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: ${{ needs.set-environment.outputs.target_env == 'staging' && 'justice-redact/justice-redact-dev' || vars.ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
-          KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
-
-      # 6. Authenticate using Kube Token (Resolved duplicate protocol prefix context)
-      - name: 'Authenticate to the cluster'
-        env:
-          KUBE_CERT: ${{ secrets.KUBE_CERT }}
-          KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
-          KUBE_CLUSTER: ${{ secrets.KUBE_CLUSTER }}
-        run: |
-          echo "${KUBE_CERT}" | base64 --decode > ca.crt
-          kubectl config set-cluster ${KUBE_CLUSTER} --certificate-authority=./ca.crt --server=${KUBE_CLUSTER}
-          kubectl config set-credentials deploy-user --token=${KUBE_TOKEN}
-          kubectl config set-context ${KUBE_CLUSTER} --cluster=${KUBE_CLUSTER} --user=deploy-user --namespace=${KUBE_NAMESPACE}
-          kubectl config use-context ${KUBE_CLUSTER}
-
-      # 5.5 Proactive Validation Step (Option A: Positioned after Authentication)
-      # Validates against the live EKS OpenAPI schemas without executing actual state updates
-      - name: Validate Kubernetes Manifests Proactively
-        run: |
-          kubectl apply --filename=k8s/ --dry-run=client
-
-      # 7. Verify cluster context connectivity
-      - name: Verify cluster access
-        run: |
-          kubectl get pods -n ${KUBE_NAMESPACE}
-
-      # 8. Deploy final compiled manifests to Kubernetes
-      - name: Deploy to Kubernetes
-        run: |
-          kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
+      # 5. Kubernetes Deployment (Skipped on PRs)
+      - name: Deploy to Kubernetes cluster
+        if: github.event_name != 'pull_request'
+        # ... keep your existing kube-actions / helm / kubectl deployment steps here intact
