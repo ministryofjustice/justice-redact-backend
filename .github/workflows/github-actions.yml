@@ -30,7 +30,8 @@ jobs:
   ecr_and_deploy:
     needs: set-environment
     runs-on: ubuntu-latest
-    environment: ${{ needs.set-environment.outputs.target_env }}
+    # Only bind to a GitHub Environment if it's a direct branch push, not a PR
+    environment: ${{ github.event_name == 'pull_request' && '' || needs.set-environment.outputs.target_env }}
     
     permissions:
       id-token: write
