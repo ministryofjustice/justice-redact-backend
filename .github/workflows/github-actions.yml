@@ -5,7 +5,7 @@ on:
     branches:
       - dev
       - staging  # 🔄 Added staging branch
-      - main     # 🚀 main is now your Production branch!
+      - main     # 🚀 main is now our Production branch!
 
 jobs:
   # JOB 1: Determine the target environment dynamically based on the Git branch
