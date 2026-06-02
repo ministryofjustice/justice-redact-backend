@@ -4,8 +4,8 @@ on:
   push:
     branches:
       - dev
+      - staging
       - main
-      - prod
 
 jobs:
   # JOB 1: Determine the target environment dynamically based on the Git branch
@@ -48,7 +48,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ needs.set-environment.outputs.target_env == 'staging' && secrets.ECR_ROLE_TO_ASSUME_DEV || secrets.ECR_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ needs.set-environment.outputs.target_env == 'staging' && secrets.ECR_ROLE_TO_ASSUME || secrets.ECR_ROLE_TO_ASSUME }}
           aws-region: ${{ needs.set-environment.outputs.target_env == 'staging' && 'eu-west-2' || vars.ECR_REGION }}
 
       # 3. Login to container repository
