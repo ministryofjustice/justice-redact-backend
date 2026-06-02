@@ -10,6 +10,8 @@ metadata:
     # Extends the timeout windows so long-running machine learning model responses do not drop
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # 🟢 FIX: Strips the matched path prefix before passing traffic to your Python app container
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
   ingressClassName: default-non-prod
   rules:

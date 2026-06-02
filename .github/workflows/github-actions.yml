@@ -89,6 +89,11 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
 
+          # 🟢 Validate Kubernetes Manifests Proactively
+      - name: Validate Kubernetes Manifests Proactively
+        run: |
+          kubectl apply --filename=k8s/ --dry-run=client
+
       # 6. Authenticate using Kube Token
       - name: 'Authenticate to the cluster'
         env:
@@ -98,11 +103,11 @@ jobs:
         run: |
           # 🟢 FIX: Added base64 --decode to correctly format the PEM certificate block
           echo "${KUBE_CERT}" | base64 --decode > ca.crt
-          kubectl config set-cluster ${KUBE_CLUSTER} --certificate-authority=./ca.crt --server=https://${KUBE_CLUSTER}
+          # 🟢 FIX: Removed the extra hardcoded 'https://' prefix before ${KUBE_CLUSTER}
+          kubectl config set-cluster ${KUBE_CLUSTER} --certificate-authority=./ca.crt --server=${KUBE_CLUSTER}
           kubectl config set-credentials deploy-user --token=${KUBE_TOKEN}
           kubectl config set-context ${KUBE_CLUSTER} --cluster=${KUBE_CLUSTER} --user=deploy-user --namespace=${KUBE_NAMESPACE}
           kubectl config use-context ${KUBE_CLUSTER}
-
       # 7. Verify cluster access
       - name: Verify cluster access
         run: |
