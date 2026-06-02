@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # 2. Configure AWS credentials using OIDC
-      # 💡 Fix: For staging branch runs, fall back to the Dev IAM role globally
+      # Fall back to the global Dev IAM role secret when building/pushing on the staging (main) branch
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
@@ -57,7 +57,7 @@ jobs:
         id: login-ecr
 
       # 4. Build and push Python Docker image to the shared dev registry
-      # 💡 Fix: Explicitly uses the exact 'team/namespace' string path expected by AWS IAM policies
+      # Preserves the explicit 'team/namespace' string matching path required by MoJ ECR IAM policies
       - name: Build & Push to ECR
         run: |
           docker build -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
@@ -67,8 +67,7 @@ jobs:
           REPOSITORY: ${{ needs.set-environment.outputs.target_env == 'staging' && 'justice-redact/justice-redact-dev' || vars.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
 
-      # 5. Generate Kubernetes manifests
-      # 💡 Fix: Dynamically handles the literal image path definitions for envsubst template mapping
+      # 5. Generate Kubernetes manifests from templates
       - name: Generate Kubernetes manifests
         run: |
           sudo apt-get update && sudo apt-get install -y gettext
@@ -89,31 +88,31 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
 
-          # 🟢 Validate Kubernetes Manifests Proactively
-      - name: Validate Kubernetes Manifests Proactively
-        run: |
-          kubectl apply --filename=k8s/ --dry-run=client
-
-      # 6. Authenticate using Kube Token
+      # 6. Authenticate using Kube Token (Resolved duplicate protocol prefix context)
       - name: 'Authenticate to the cluster'
         env:
           KUBE_CERT: ${{ secrets.KUBE_CERT }}
           KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
           KUBE_CLUSTER: ${{ secrets.KUBE_CLUSTER }}
         run: |
-          # 🟢 FIX: Added base64 --decode to correctly format the PEM certificate block
           echo "${KUBE_CERT}" | base64 --decode > ca.crt
-          # 🟢 FIX: Removed the extra hardcoded 'https://' prefix before ${KUBE_CLUSTER}
           kubectl config set-cluster ${KUBE_CLUSTER} --certificate-authority=./ca.crt --server=${KUBE_CLUSTER}
           kubectl config set-credentials deploy-user --token=${KUBE_TOKEN}
           kubectl config set-context ${KUBE_CLUSTER} --cluster=${KUBE_CLUSTER} --user=deploy-user --namespace=${KUBE_NAMESPACE}
           kubectl config use-context ${KUBE_CLUSTER}
-      # 7. Verify cluster access
+
+      # 5.5 Proactive Validation Step (Option A: Positioned after Authentication)
+      # Validates against the live EKS OpenAPI schemas without executing actual state updates
+      - name: Validate Kubernetes Manifests Proactively
+        run: |
+          kubectl apply --filename=k8s/ --dry-run=client
+
+      # 7. Verify cluster context connectivity
       - name: Verify cluster access
         run: |
           kubectl get pods -n ${KUBE_NAMESPACE}
 
-      # 8. Deploy to Kubernetes
+      # 8. Deploy final compiled manifests to Kubernetes
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -f k8s/ -n ${KUBE_NAMESPACE}
+          kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
