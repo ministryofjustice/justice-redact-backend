@@ -96,7 +96,8 @@ jobs:
           KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
           KUBE_CLUSTER: ${{ secrets.KUBE_CLUSTER }}
         run: |
-          echo "${KUBE_CERT}" > ca.crt
+          # 🟢 FIX: Added base64 --decode to correctly format the PEM certificate block
+          echo "${KUBE_CERT}" | base64 --decode > ca.crt
           kubectl config set-cluster ${KUBE_CLUSTER} --certificate-authority=./ca.crt --server=https://${KUBE_CLUSTER}
           kubectl config set-credentials deploy-user --token=${KUBE_TOKEN}
           kubectl config set-context ${KUBE_CLUSTER} --cluster=${KUBE_CLUSTER} --user=deploy-user --namespace=${KUBE_NAMESPACE}
