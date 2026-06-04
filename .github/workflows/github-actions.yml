@@ -49,7 +49,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
           aws-region: eu-west-2
-          
+
       # 3. Login to container repository
       - name: Log into ECR
         uses: aws-actions/amazon-ecr-login@v2
