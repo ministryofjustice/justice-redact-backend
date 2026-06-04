@@ -7,19 +7,21 @@ metadata:
     external-dns.alpha.kubernetes.io/aws-weight: '100'
     external-dns.alpha.kubernetes.io/set-identifier: 'justice-redact-backend-${NAMESPACE}-green'
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    # Extends the timeout windows so long-running machine learning model responses do not drop
+    # Extends timeout windows so long-running ML model responses do not drop
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-    # 🟢 FIX: Strips the matched path prefix before passing traffic to your Python app container
+    # Strips the /api prefix before passing traffic to the Python app container
     nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
-  ingressClassName: default-non-prod
+  # dynamic: default-non-prod for dev/staging, default for prod
+  ingressClassName: ${INGRESS_CLASS}
   rules:
     - host: ${NAMESPACE}.apps.live.cloud-platform.service.justice.gov.uk
       http:
         paths:
-          - path: /api
-            pathType: Prefix
+          # Capture group (/|$)(.*) required for the rewrite-target /$2 annotation to work
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: justice-redact-backend-service
