@@ -1,14 +1,22 @@
-name: 'Build, Push & Deploy Backend'
+name: Build, Push & Deploy Backend
 
 on:
   push:
     branches:
       - dev
       - staging
-      - prod
+      - main
+  pull_request:
+    branches:
+      - dev
+      - staging
+      - main
+
+permissions:
+  id-token: write # Required for AWS OIDC authentication
+  contents: read  # Required to checkout the repository code
 
 jobs:
-  # JOB 1: Determine the target environment dynamically based on the Git branch
   set-environment:
     runs-on: ubuntu-latest
     outputs:
@@ -20,104 +28,69 @@ jobs:
             echo "env_name=dev" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref_name }}" = "staging" ]; then
             echo "env_name=staging" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "prod" ]; then
+          elif [ "${{ github.ref_name }}" = "main" ]; then
             echo "env_name=prod" >> $GITHUB_OUTPUT
           else
             echo "env_name=dev" >> $GITHUB_OUTPUT
           fi
 
-  # JOB 2: Build, Push, and Deploy using the dynamic environment context
   ecr_and_deploy:
     needs: set-environment
     runs-on: ubuntu-latest
-    environment: ${{ needs.set-environment.outputs.target_env }}
-
-    permissions:
-      id-token: write
-      contents: read
-
-    env:
-      KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
+    # Only bind to environment secrets if it's a valid deployment push
+    environment: ${{ (github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')) && needs.set-environment.outputs.target_env || '' }}
 
     steps:
-      # 1. Checkout GitHub repository
-      - uses: actions/checkout@v4
+      # 1. Checkout Application Code
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      # 2. Configure AWS credentials using OIDC
+      # 2. Configure AWS credentials via OIDC (Strict Branch Guard)
       - name: Configure AWS credentials
+        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ needs.set-environment.outputs.target_env == 'staging' && secrets.ECR_ROLE_TO_ASSUME_DEV || secrets.ECR_ROLE_TO_ASSUME }}
-          aws-region: ${{ needs.set-environment.outputs.target_env == 'staging' && 'eu-west-2' || vars.ECR_REGION }}
+          role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
+          aws-region: eu-west-2
 
-      # 3. Login to container repository
-      - name: Log into ECR
-        uses: aws-actions/amazon-ecr-login@v2
+      # 3. Log into Amazon ECR (Strict Branch Guard)
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
         id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      # 4. Build and push Docker image to environment-specific ECR repo
-      # Each environment has its own ECR repo: justice-redact/justice-redact-<env>
-      - name: Build & Push to ECR
-        run: |
-          docker build -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
-          docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
+      # 4. Build Docker Image (Local verification for PRs/test branches, Remote Push for Protected Merges)
+      - name: Build, tag, and push image to Amazon ECR
         env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: justice-redact-backend
           IMAGE_TAG: ${{ github.sha }}
-
-      # 5. Generate Kubernetes manifests from templates
-      - name: Generate Kubernetes manifests
         run: |
-          sudo apt-get update && sudo apt-get install -y gettext
-          mkdir -p k8s
-
-          export TEAM_NAME=justice-redact
-          export ENVIRONMENT="${{ needs.set-environment.outputs.target_env }}"
-          export NAMESPACE="${KUBE_NAMESPACE}"
-          export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
-          export SERVICE_ACCOUNT="justice-redact-${ENVIRONMENT}"
-
-          # Use non-prod ingress class for dev/staging, default for prod
-          if [ "${ENVIRONMENT}" = "prod" ]; then
-            export INGRESS_CLASS="default"
+          if [ "${{ github.event_name }}" = "push" ] && { [ "${{ github.ref_name }}" = "dev" ] || [ "${{ github.ref_name }}" = "staging" ] || [ "${{ github.ref_name }}" = "main" ]; }; then
+            echo "🚀 Target Branch Merge Detected: Delivering image to AWS ECR..."
+            docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+            docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           else
-            export INGRESS_CLASS="default-non-prod"
+            echo "📊 PR / Feature Branch Context: Validating image build stability locally..."
+            docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+            echo "✅ Local compilation successful! Skipping ECR registry push for security."
           fi
 
-          envsubst < deployments/templates/deployment.yml > k8s/deployment.yml
-          envsubst < deployments/templates/service.yml > k8s/service.yml
-          envsubst < deployments/templates/ingress.yml > k8s/ingress.yml
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
-          IMAGE_TAG: ${{ github.sha }}
-          KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
-
-      # 6. Authenticate to the cluster using Kube Token
-      - name: Authenticate to the cluster
-        env:
-          KUBE_CERT: ${{ secrets.KUBE_CERT }}
-          KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
-          KUBE_CLUSTER: ${{ secrets.KUBE_CLUSTER }}
-        run: |
-          echo "${KUBE_CERT}" | base64 --decode > ca.crt
-          kubectl config set-cluster ${KUBE_CLUSTER} --certificate-authority=./ca.crt --server=${KUBE_CLUSTER}
-          kubectl config set-credentials deploy-user --token=${KUBE_TOKEN}
-          kubectl config set-context ${KUBE_CLUSTER} --cluster=${KUBE_CLUSTER} --user=deploy-user --namespace=${KUBE_NAMESPACE}
-          kubectl config use-context ${KUBE_CLUSTER}
-
-      # 7. Validate manifests against live cluster schemas before applying
-      - name: Validate Kubernetes Manifests
-        run: |
-          kubectl apply --filename=k8s/ --dry-run=client
-
-      # 8. Verify cluster context connectivity
-      - name: Verify cluster access
-        run: |
-          kubectl get pods -n ${KUBE_NAMESPACE}
-
-      # 9. Deploy to Kubernetes
-      - name: Deploy to Kubernetes
-        run: |
-          kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
+      # 5. Authenticate & Deploy to Kubernetes Cluster (Strict Branch Guard)
+      - name: Deploy to Cloud Platform Kubernetes Cluster
+        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
+        uses: bitovi/github-actions-deploy-eks-helm@v1.2.8
+        with:
+          name: justice-redact-backend
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+          aws-region: eu-west-2
+          cluster-name: ${{ secrets.KUBE_CLUSTER }}
+          config-files: .metadata/kubeconfig
+          chart-path: helm/justice-redact-backend
+          namespace: ${{ secrets.KUBE_NAMESPACE }}
+          values: |
+            image:
+              repository: ${{ steps.login-ecr.outputs.registry }}/justice-redact-backend
+              tag: ${{ github.sha }}
