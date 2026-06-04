@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - dev
-      - main
+      - staging
       - prod
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
         run: |
           if [ "${{ github.ref_name }}" = "dev" ]; then
             echo "env_name=dev" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "main" ]; then
+          elif [ "${{ github.ref_name }}" = "staging" ]; then
             echo "env_name=staging" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref_name }}" = "prod" ]; then
             echo "env_name=prod" >> $GITHUB_OUTPUT
@@ -31,11 +31,11 @@ jobs:
     needs: set-environment
     runs-on: ubuntu-latest
     environment: ${{ needs.set-environment.outputs.target_env }}
-    
+
     permissions:
       id-token: write
       contents: read
-    
+
     env:
       KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
 
@@ -44,7 +44,6 @@ jobs:
       - uses: actions/checkout@v4
 
       # 2. Configure AWS credentials using OIDC
-      # Fall back to the global Dev IAM role secret when building/pushing on the staging (main) branch
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
@@ -56,15 +55,15 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
 
-      # 4. Build and push Python Docker image to the shared dev registry
-      # Preserves the explicit 'team/namespace' string matching path required by MoJ ECR IAM policies
+      # 4. Build and push Docker image to environment-specific ECR repo
+      # Each environment has its own ECR repo: justice-redact/justice-redact-<env>
       - name: Build & Push to ECR
         run: |
           docker build -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
           docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: ${{ needs.set-environment.outputs.target_env == 'staging' && 'justice-redact/justice-redact-dev' || vars.ECR_REPOSITORY }}
+          REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
           IMAGE_TAG: ${{ github.sha }}
 
       # 5. Generate Kubernetes manifests from templates
@@ -75,21 +74,28 @@ jobs:
 
           export TEAM_NAME=justice-redact
           export ENVIRONMENT="${{ needs.set-environment.outputs.target_env }}"
-          export NAMESPACE="${KUBE_NAMESPACE}" 
+          export NAMESPACE="${KUBE_NAMESPACE}"
           export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
-          export SERVICE_ACCOUNT="cd-serviceaccount"
+          export SERVICE_ACCOUNT="justice-redact-${ENVIRONMENT}"
+
+          # Use non-prod ingress class for dev/staging, default for prod
+          if [ "${ENVIRONMENT}" = "prod" ]; then
+            export INGRESS_CLASS="default"
+          else
+            export INGRESS_CLASS="default-non-prod"
+          fi
 
           envsubst < deployments/templates/deployment.yml > k8s/deployment.yml
           envsubst < deployments/templates/service.yml > k8s/service.yml
           envsubst < deployments/templates/ingress.yml > k8s/ingress.yml
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: ${{ needs.set-environment.outputs.target_env == 'staging' && 'justice-redact/justice-redact-dev' || vars.ECR_REPOSITORY }}
+          REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
           IMAGE_TAG: ${{ github.sha }}
           KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
 
-      # 6. Authenticate using Kube Token (Resolved duplicate protocol prefix context)
-      - name: 'Authenticate to the cluster'
+      # 6. Authenticate to the cluster using Kube Token
+      - name: Authenticate to the cluster
         env:
           KUBE_CERT: ${{ secrets.KUBE_CERT }}
           KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
@@ -101,18 +107,17 @@ jobs:
           kubectl config set-context ${KUBE_CLUSTER} --cluster=${KUBE_CLUSTER} --user=deploy-user --namespace=${KUBE_NAMESPACE}
           kubectl config use-context ${KUBE_CLUSTER}
 
-      # 5.5 Proactive Validation Step (Option A: Positioned after Authentication)
-      # Validates against the live EKS OpenAPI schemas without executing actual state updates
-      - name: Validate Kubernetes Manifests Proactively
+      # 7. Validate manifests against live cluster schemas before applying
+      - name: Validate Kubernetes Manifests
         run: |
           kubectl apply --filename=k8s/ --dry-run=client
 
-      # 7. Verify cluster context connectivity
+      # 8. Verify cluster context connectivity
       - name: Verify cluster access
         run: |
           kubectl get pods -n ${KUBE_NAMESPACE}
 
-      # 8. Deploy final compiled manifests to Kubernetes
+      # 9. Deploy to Kubernetes
       - name: Deploy to Kubernetes
         run: |
           kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
