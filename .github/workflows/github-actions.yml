@@ -1,4 +1,4 @@
-name: 'Build, Push & Deploy Backend'
+name: Build, Push & Deploy Backend
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
             echo "env_name=dev" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref_name }}" = "staging" ]; then
             echo "env_name=staging" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "prod" ]; then
+          elif [ "${{ github.ref_name }}" = "main" ]; then
             echo "env_name=prod" >> $GITHUB_OUTPUT
           else
             echo "env_name=dev" >> $GITHUB_OUTPUT
@@ -41,6 +41,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
+        if: github.event_name != 'pull_request'
         uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
@@ -49,6 +50,7 @@ jobs:
       - name: Log into ECR
         uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build & Push to ECR
         run: |
