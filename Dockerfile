@@ -1,5 +1,5 @@
 # Stage: base image
-FROM python:3.11-slim AS base
+FROM python:3.12-slim AS base
 
 ENV TZ=Europe/London
 RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
@@ -13,7 +13,7 @@ RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/* && \
-    pip install --no-cache-dir --upgrade pip setuptools wheel
+    # pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Stage: development image
 FROM base AS dev
