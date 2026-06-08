@@ -1,9 +1,11 @@
-from justice_redact.detection import detect_for_review
+from pathlib import Path
 
+from justice_redact.detection import detect_for_review
+from justice_redact.pdf_handler.images import render_pdf_region_to_png
+
+from app.services.comprehend_service import detect_pii_entities
 from app.services.document_store import get_document
 from app.services.file_store import processed_review_path, upload_pdf_path, write_json
-from pathlib import Path
-from justice_redact.pdf_handler.images import render_pdf_region_to_png
 
 
 async def process_document_pipeline(document_id: str) -> None:
@@ -59,6 +61,29 @@ async def process_document_pipeline(document_id: str) -> None:
                     f"/documents/{document_id}/images/{image['imageId']}.png"
                 )
 
+        # ---------------------------------------------------------------------------
+        # ADDED: Comprehend PII detection
+        # Extract all text from the result pages and run it through AWS Comprehend.
+        # The detected PII entities are added to the result under "comprehendEntities"
+        # and will be returned as part of the GET /{document_id}/review response.
+        #
+        # If Comprehend fails (e.g. AP role not yet configured, network issue),
+        # we log the error and continue — the review result is still written
+        # so the rest of the pipeline is not blocked.
+        # ---------------------------------------------------------------------------
+        full_text = _extract_full_text(result)
+
+        if full_text.strip():
+            try:
+                comprehend_response = detect_pii_entities(full_text)
+                result["comprehendEntities"] = comprehend_response.get("Entities", [])
+            except Exception as comprehend_exc:
+                # Non-fatal: surface the error in the result but don't fail the pipeline
+                result["comprehendEntities"] = []
+                result["comprehendError"] = str(comprehend_exc)
+        else:
+            result["comprehendEntities"] = []
+
         result["documentId"] = document_id
         result["filename"] = document["filename"]
         result["status"] = "ready_for_review"
@@ -70,3 +95,26 @@ async def process_document_pipeline(document_id: str) -> None:
     except Exception as exc:
         document["status"] = "failed"
         document["error"] = str(exc)
+
+
+def _extract_full_text(result: dict) -> str:
+    """
+    Pulls all text spans from the detect_for_review result into a single string
+    for Comprehend to analyse. Comprehend needs plain text, not structured JSON.
+    """
+    text_parts = []
+
+    for page in result.get("pages", []):
+        for block in page.get("textBlocks", []):
+            text = block.get("text", "").strip()
+            if text:
+                text_parts.append(text)
+
+        for table in page.get("tables", []):
+            for row in table.get("rows", []):
+                for cell in row.get("cells", []):
+                    text = cell.get("text", "").strip()
+                    if text:
+                        text_parts.append(text)
+
+    return " ".join(text_parts)

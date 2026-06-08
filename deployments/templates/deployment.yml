@@ -22,3 +22,10 @@ spec:
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
+            # ADDED: ARN of the cross-account IAM role in the Analytical Platform
+            # AWS account that grants AWS Comprehend access. The pod assumes this
+            # role via STS using the IRSA credentials bound to ${SERVICE_ACCOUNT}.
+            # Value is injected by envsubst from AP_ACCOUNT_ID in the workflow.
+            - name: AP_COMPREHEND_ROLE_ARN
+              value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
+ 
