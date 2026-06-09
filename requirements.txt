@@ -2,4 +2,3 @@ fastapi
 uvicorn[standard]
 python-multipart
 pydantic
-boto3
