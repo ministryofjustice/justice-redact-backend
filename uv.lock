@@ -550,7 +550,7 @@ wheels = [
 [[package]]
 name = "justice-redact"
 version = "0.1.0"
-source = { editable = "../justice-redact" }
+source = { git = "https://github.com/moj-analytical-services/justice-redact.git?rev=62a9473880886a52e5e4a3b66f1c1299ea12b6c9#62a9473880886a52e5e4a3b66f1c1299ea12b6c9" }
 dependencies = [
     { name = "boto3" },
     { name = "en-core-web-sm" },
@@ -559,18 +559,6 @@ dependencies = [
     { name = "pymupdf" },
     { name = "rapidfuzz" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "boto3", specifier = "==1.42.13" },
-    { name = "en-core-web-sm", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
-    { name = "pdfplumber" },
-    { name = "presidio-evaluator", specifier = "==0.2.5" },
-    { name = "pymupdf", specifier = "==1.26.7" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2,<10" },
-    { name = "rapidfuzz", specifier = "==3.14.3" },
-]
-provides-extras = ["test"]
 
 [[package]]
 name = "justice-redact-backend"
@@ -592,7 +580,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi" },
-    { name = "justice-redact", editable = "../justice-redact" },
+    { name = "justice-redact", git = "https://github.com/moj-analytical-services/justice-redact.git?rev=62a9473880886a52e5e4a3b66f1c1299ea12b6c9" },
     { name = "pydantic" },
     { name = "python-multipart" },
     { name = "uvicorn", extras = ["standard"] },
