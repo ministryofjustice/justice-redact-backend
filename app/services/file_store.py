@@ -19,6 +19,11 @@ def decisions_path(document_id: str) -> Path:
     return DECISIONS_DIR / f"{document_id}.json"
 
 
+def vetted_pdf_path(document_id: str) -> Path:
+
+    return EXPORTS_DIR / f"{document_id}-vetted.pdf"
+
+
 def export_pdf_path(document_id: str) -> Path:
     return EXPORTS_DIR / f"{document_id}-redacted.pdf"
 
