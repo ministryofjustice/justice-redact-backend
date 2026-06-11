@@ -58,25 +58,38 @@ jobs:
         if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+      
+      # 4. Obtain short-lived GitHub token for justice-redact dependency
+      - name: Obtain Octo STS Token
+        uses: octo-sts/action@6177b4481c00308b3839969c3eca88c96a91775f
+        id: octo_sts
+        with:
+          scope: moj-analytical-services/justice-redact
+          identity: ministryofjustice-justice-redact-backend
 
-      # 4. Build Docker Image (Local verification for PRs/test branches, Remote Push for Protected Merges)
+      # 5. Build Docker Image (Local verification for PRs/test branches, Remote Push for Protected Merges)
       - name: Build, tag, and push image to Amazon ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: justice-redact-backend
           IMAGE_TAG: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ steps.octo_sts.outputs.token }}
         run: |
           if [ "${{ github.event_name }}" = "push" ] && { [ "${{ github.ref_name }}" = "dev" ] || [ "${{ github.ref_name }}" = "staging" ] || [ "${{ github.ref_name }}" = "main" ]; }; then
             echo "🚀 Target Branch Merge Detected: Delivering image to AWS ECR..."
-            docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+            DOCKER_BUILDKIT=1 docker build \
+             --secret id=github_token,env=GITHUB_TOKEN \
+             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG . \
             docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           else
             echo "📊 PR / Feature Branch Context: Validating image build stability locally..."
-            docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+            DOCKER_BUILDKIT=1 docker build \
+             --secret id=github_token,env=GITHUB_TOKEN \
+             -t $ECR_REPOSITORY:$IMAGE_TAG .
             echo "✅ Local compilation successful! Skipping ECR registry push for security."
           fi
 
-      # 5. Authenticate & Deploy to Kubernetes Cluster (Strict Branch Guard)
+      # 6. Authenticate & Deploy to Kubernetes Cluster (Strict Branch Guard)
       - name: Deploy to Cloud Platform Kubernetes Cluster
         if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
         uses: bitovi/github-actions-deploy-eks-helm@v1.2.8

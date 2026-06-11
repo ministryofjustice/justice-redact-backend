@@ -34,23 +34,31 @@ FROM base AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock ./
+
+RUN --mount=type=secret,id=github_token \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token)" && \
+    git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/" && \
+    uv sync --frozen --no-dev --no-cache --no-editable --system && \
+    git config --global --unset-all url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf
 
 # Stage: copy production assets and dependencies
 FROM base
-
+COPY --from=build /usr/local /usr/local
 # Copy only the compiled Python packages from the build stage user space
-COPY --from=build --chown=appuser:appgroup /root/.local /home/appuser/.local
+# COPY --from=build --chown=appuser:appgroup /root/.local /home/appuser/.local
 COPY --from=build --chown=appuser:appgroup /app /app
 
 # Copy python app source files
 COPY --chown=appuser:appgroup . .
 
 # Ensure python binary path discovering and instant log streaming to K8s terminal
-ENV PATH=/home/appuser/.local/bin:$PATH
+# ENV PATH=/home/appuser/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
