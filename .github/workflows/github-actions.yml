@@ -1,4 +1,4 @@
-name: 'Build, Push & Deploy Backend'
+name: Build, Push & Deploy Backend
 
 on:
   push:
@@ -41,6 +41,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
+        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'prod')
         uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
@@ -49,15 +50,27 @@ jobs:
       - name: Log into ECR
         uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
+      
+      # 4. Obtain short-lived GitHub token for justice-redact dependency
+      - name: Obtain Octo STS Token
+        uses: octo-sts/action@6177b4481c00308b3839969c3eca88c96a91775f
+        id: octo_sts
+        with:
+          scope: moj-analytical-services/justice-redact
+          identity: ministryofjustice-justice-redact-backend
 
       - name: Build & Push to ECR
-        run: |
-          docker build -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
-          docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
           IMAGE_TAG: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ steps.octo_sts.outputs.token }}
+        run: |
+          DOCKER_BUILDKIT=1 docker build \
+            --secret id=github_token,env=GITHUB_TOKEN \
+            -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
+
+          docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
 
       - name: Generate Kubernetes manifests
         run: |

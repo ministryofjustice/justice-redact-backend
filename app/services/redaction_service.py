@@ -1,6 +1,9 @@
 from fastapi import HTTPException
 from justice_redact.pdf_handler import extract_document
-from justice_redact.pdf_handler.apply import apply_pdf_decisions
+from justice_redact.pdf_handler.apply import (
+    apply_pdf_decisions,
+    apply_vetted_pdf_highlights,
+)
 from justice_redact.pdf_handler.decisions import (
     ImageRegionDecision,
     TableTextSpanDecision,
@@ -16,6 +19,7 @@ from app.models.redaction_models import (
 from app.services.file_store import (
     decisions_path,
     export_pdf_path,
+    vetted_pdf_path,
     upload_pdf_path,
     write_json,
 )
@@ -78,7 +82,9 @@ def apply_redactions_for_document(
     write_json(decisions_path(document_id), request.model_dump())
 
     pdf_path = upload_pdf_path(document_id)
-    output_path = export_pdf_path(document_id)
+
+    redacted_output_path = export_pdf_path(document_id)
+    vetted_output_path = vetted_pdf_path(document_id)
 
     document_model = extract_document(pdf_path)
     typed_decisions = build_pdf_handler_decisions(
@@ -96,11 +102,19 @@ def apply_redactions_for_document(
         document=document_model,
         pdf_path=pdf_path,
         decisions=typed_decisions,
-        output_path=output_path,
+        output_path=redacted_output_path,
+    )
+
+    apply_vetted_pdf_highlights(
+        document=document_model,
+        pdf_path=pdf_path,
+        decisions=typed_decisions,
+        output_path=vetted_output_path,
     )
 
     return {
         "totalDecisionsApplied": len(typed_decisions),
         "decisionTypes": sorted({decision.kind for decision in request.decisions}),
-        "exportPath": str(output_path),
+        "exportPath": str(redacted_output_path),
+        "vettedExportPath": str(vetted_output_path),
     }
