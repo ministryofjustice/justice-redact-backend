@@ -1,10 +1,6 @@
 from sqlalchemy import Column, ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase
-
-
-class Base(DeclarativeBase):
-    pass
+from app.models.document import Base
 
 
 class ReviewResult(Base):
