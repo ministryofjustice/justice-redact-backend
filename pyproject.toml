@@ -9,6 +9,8 @@ dependencies = [
     "python-multipart",
     "pydantic",
     "justice-redact",
+    "sqlalchemy",
+    "psycopg[binary]",
 ]
 
 [dependency-groups]
