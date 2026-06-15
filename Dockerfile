@@ -38,13 +38,16 @@ RUN --mount=type=secret,id=github_token \
 FROM base
 
 COPY --from=build /usr/local /usr/local
+COPY --from=build /app/.venv /app/.venv
 
 COPY --chown=appuser:appgroup . .
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH=/app
+ENV PATH="/app/.venv/bin:$PATH"
 
+EXPOSE 8080
 USER 2000
 
 ENTRYPOINT []
