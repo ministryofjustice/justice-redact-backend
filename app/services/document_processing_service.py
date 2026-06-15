@@ -5,6 +5,7 @@ from app.services.file_store import processed_review_path, write_json
 from app.services.s3_service import download_file_from_s3
 from pathlib import Path
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
+import traceback
 
 
 async def process_document_pipeline(document_id: str) -> None:
@@ -76,5 +77,11 @@ async def process_document_pipeline(document_id: str) -> None:
         document["status"] = "ready_for_review"
 
     except Exception as exc:
-        document["status"] = "failed"
-        document["error"] = str(exc)
+        traceback.print_exc()
+
+        from app.services.document_store import update_document_record
+
+        update_document_record(
+            document_id,
+            status="failed",
+        )
