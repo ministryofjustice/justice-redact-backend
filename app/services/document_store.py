@@ -50,3 +50,35 @@ def get_document_or_404(document_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Document not found")
 
     return document
+
+
+def update_document_record(
+    document_id: str,
+    *,
+    status: str | None = None,
+    subject_name: str | None = None,
+    subject_prison_number: str | None = None,
+    other_phrases: str | None = None,
+) -> dict:
+    with SessionLocal() as session:
+        document = session.get(Document, document_id)
+
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        if status is not None:
+            document.status = status
+
+        if subject_name is not None:
+            document.subject_name = subject_name
+
+        if subject_prison_number is not None:
+            document.subject_prison_number = subject_prison_number
+
+        if other_phrases is not None:
+            document.other_phrases = other_phrases
+
+        session.commit()
+        session.refresh(document)
+
+        return document_to_dict(document)

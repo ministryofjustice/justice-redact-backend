@@ -3,7 +3,11 @@ from uuid import uuid4
 
 from app.models.document_requests import ProcessDocumentRequest
 from app.services.document_processing_service import process_document_pipeline
-from app.services.document_store import create_document_record, get_document_or_404
+from app.services.document_store import (
+    create_document_record,
+    get_document_or_404,
+    update_document_record,
+)
 from app.services.file_store import save_upload_file, upload_pdf_path
 from pathlib import Path
 from fastapi import APIRouter, File, UploadFile, HTTPException
@@ -37,12 +41,15 @@ async def upload_document(file: UploadFile = File(...)):
 
 @router.post("/{document_id}/process")
 async def process_document(document_id: str, request: ProcessDocumentRequest):
-    document = get_document_or_404(document_id)
+    get_document_or_404(document_id)
 
-    document["subjectName"] = request.subjectName
-    document["subjectPrisonNumber"] = request.subjectPrisonNumber
-    document["otherPhrases"] = request.otherPhrases
-    document["status"] = "processing"
+    update_document_record(
+        document_id,
+        status="processing",
+        subject_name=request.subjectName,
+        subject_prison_number=request.subjectPrisonNumber,
+        other_phrases=request.otherPhrases,
+    )
 
     asyncio.create_task(process_document_pipeline(document_id))
 
