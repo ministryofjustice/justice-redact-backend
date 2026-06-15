@@ -36,7 +36,7 @@ async def process_document_pipeline(document_id: str) -> None:
             other_phrases=other_phrases_list,
         )
 
-        image_preview_dir = Path("data/processed") / document_id / "images"
+        image_preview_dir = Path("/tmp") / "processed" / document_id / "images"
         image_preview_dir.mkdir(parents=True, exist_ok=True)
 
         for page in result.get("pages", []):
