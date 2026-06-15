@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import UploadFile
-
+from app.services.s3_service import upload_file_to_s3
 from app.core.paths import DECISIONS_DIR, EXPORTS_DIR, PROCESSED_DIR, UPLOAD_DIR
 
 
@@ -28,9 +28,18 @@ def export_pdf_path(document_id: str) -> Path:
     return EXPORTS_DIR / f"{document_id}-redacted.pdf"
 
 
-def save_upload_file(file: UploadFile, destination: Path) -> None:
+def save_upload_file(
+    file: UploadFile,
+    destination: Path,
+    document_id: str,
+) -> None:
     with destination.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+
+    upload_file_to_s3(
+        destination,
+        f"documents/{document_id}/original/{file.filename}",
+    )
 
 
 def write_json(path: Path, data: dict) -> None:

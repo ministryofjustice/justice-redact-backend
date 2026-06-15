@@ -20,7 +20,11 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
 
     document_id = str(uuid4())
-    save_upload_file(file, upload_pdf_path(document_id))
+    save_upload_file(
+        file,
+        upload_pdf_path(document_id),
+        document_id,
+    )
     create_document_record(
         document_id=document_id, filename=file.filename or "document.pdf"
     )
