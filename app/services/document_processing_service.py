@@ -1,7 +1,8 @@
 from justice_redact.detection import detect_for_review
 
 from app.services.document_store import get_document
-from app.services.file_store import processed_review_path, upload_pdf_path, write_json
+from app.services.file_store import processed_review_path, write_json
+from app.services.s3_service import download_file_from_s3
 from pathlib import Path
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
 
@@ -12,7 +13,14 @@ async def process_document_pipeline(document_id: str) -> None:
         return
 
     try:
-        pdf_path = str(upload_pdf_path(document_id))
+        temp_pdf_path = Path("/tmp") / f"{document_id}.pdf"
+
+        download_file_from_s3(
+            f"documents/{document_id}/original/{document['filename']}",
+            temp_pdf_path,
+        )
+
+        pdf_path = str(temp_pdf_path)
 
         other_phrases_list = [
             phrase.strip()
