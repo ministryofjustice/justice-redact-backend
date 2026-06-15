@@ -49,4 +49,4 @@ USER 2000
 
 ENTRYPOINT []
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

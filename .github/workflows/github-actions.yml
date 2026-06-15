@@ -160,3 +160,11 @@ jobs:
             echo "===== Previous logs for $pod ====="
             kubectl logs -n ${KUBE_NAMESPACE} ${pod#pod/} --previous --tail=200 || true
           done
+      
+      - name: Describe backend pods
+        run: |
+          for pod in $(kubectl get pods -n ${KUBE_NAMESPACE} -o name | grep justice-redact-backend); do
+            echo "===== $pod ====="
+            kubectl describe $pod -n ${KUBE_NAMESPACE}
+            echo ""
+          done
