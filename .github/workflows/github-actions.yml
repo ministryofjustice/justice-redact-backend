@@ -122,6 +122,20 @@ jobs:
         run: |
           kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
       
+      - name: Debug backend logs
+        run: |
+          kubectl get pods -n ${KUBE_NAMESPACE}
+
+          for pod in $(kubectl get pods -n ${KUBE_NAMESPACE} -o name | grep justice-redact-backend); do
+            echo ""
+            echo "===== $pod ====="
+            kubectl logs -n ${KUBE_NAMESPACE} ${pod#pod/} --tail=200 || true
+
+            echo ""
+            echo "===== Previous logs ====="
+            kubectl logs -n ${KUBE_NAMESPACE} ${pod#pod/} --previous --tail=200 || true
+          done    
+      
       - name: Debug backend deployment
         run: |
           kubectl describe deployment justice-redact-backend -n ${KUBE_NAMESPACE} || true
