@@ -31,7 +31,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=secret,id=github_token \
     GITHUB_TOKEN="$(cat /run/secrets/github_token)" && \
     git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/" && \
-    uv sync --frozen --no-dev --no-cache --no-editable --system && \
+    uv sync --frozen --no-dev --no-cache --no-editable && \
     git config --global --unset-all url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf
 
 # Stage: production/runtime image
