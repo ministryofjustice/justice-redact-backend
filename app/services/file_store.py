@@ -33,12 +33,14 @@ def save_upload_file(
     destination: Path,
     document_id: str,
 ) -> None:
-    with destination.open("wb") as buffer:
+    temp_path = Path("/tmp") / f"{document_id}.pdf"
+
+    with temp_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     upload_file_to_s3(
-        destination,
-        f"documents/{document_id}/original/{file.filename}",
+        temp_path,
+        f"documents/{document_id}/original/{file.filename or 'document.pdf'}",
     )
 
 
