@@ -122,6 +122,17 @@ jobs:
         run: |
           kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
       
+      - name: Debug backend service endpoints
+        run: |
+          echo "=== Backend pods ==="
+          kubectl get pods -n ${KUBE_NAMESPACE} -l app=justice-redact-backend -o wide
+      
+          echo "=== Backend service ==="
+          kubectl describe service justice-redact-backend-service -n ${KUBE_NAMESPACE}
+      
+          echo "=== Backend ingress ==="
+          kubectl describe ingress justice-redact-backend -n ${KUBE_NAMESPACE}
+      
       - name: Debug backend logs
         run: |
           kubectl get pods -n ${KUBE_NAMESPACE}
