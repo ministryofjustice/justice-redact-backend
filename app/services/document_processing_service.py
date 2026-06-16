@@ -1,6 +1,6 @@
 from justice_redact.detection import detect_for_review
 
-from app.services.document_store import get_document
+from app.services.document_store import get_document, update_document_record
 from app.services.review_result_store import upsert_review_result
 from app.services.s3_service import download_file_from_s3
 from pathlib import Path
@@ -77,7 +77,10 @@ async def process_document_pipeline(document_id: str) -> None:
             review_json=result,
         )
 
-        document["status"] = "ready_for_review"
+        update_document_record(
+            document_id,
+            status="ready_for_review",
+        )
 
     except Exception as exc:
         traceback.print_exc()
