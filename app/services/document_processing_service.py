@@ -3,6 +3,7 @@ from justice_redact.detection import detect_for_review
 from app.services.document_store import get_document, update_document_record
 from app.services.review_result_store import upsert_review_result
 from app.services.s3_service import download_file_from_s3, upload_file_to_s3
+from app.services.s3_keys import preview_image_key
 from pathlib import Path
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
 import traceback
@@ -64,7 +65,10 @@ async def process_document_pipeline(document_id: str) -> None:
                     output_path=output_path,
                 )
 
-                preview_key = f"documents/{document_id}/previews/{image['imageId']}.png"
+                preview_key = preview_image_key(
+                    document_id,
+                    image["imageId"],
+                )
 
                 upload_file_to_s3(
                     output_path,

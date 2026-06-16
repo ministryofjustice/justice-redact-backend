@@ -12,6 +12,7 @@ from app.services.file_store import save_upload_file, upload_pdf_path
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from fastapi.responses import Response
 from app.services.s3_service import get_object_from_s3
+from app.services.s3_keys import preview_image_key
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -61,7 +62,10 @@ async def process_document(document_id: str, request: ProcessDocumentRequest):
 
 @router.get("/{document_id}/images/{image_id}.png")
 async def get_document_image_preview(document_id: str, image_id: str):
-    key = f"documents/{document_id}/previews/{image_id}.png"
+    key = preview_image_key(
+        document_id,
+        image_id,
+    )
 
     try:
         image_bytes = get_object_from_s3(key)
