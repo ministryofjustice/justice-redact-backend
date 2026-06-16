@@ -16,3 +16,13 @@ def upsert_review_result(document_id: str, review_json: dict) -> None:
             review_result.review_json = review_json
 
         session.commit()
+
+
+def get_review_result(document_id: str) -> dict | None:
+    with SessionLocal() as session:
+        review_result = session.get(ReviewResult, document_id)
+
+        if review_result is None:
+            return None
+
+        return review_result.review_json
