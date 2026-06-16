@@ -1,4 +1,8 @@
 from fastapi import HTTPException
+from pathlib import Path
+from app.services.s3_keys import original_pdf_key, redacted_pdf_key, vetted_pdf_key
+from app.services.s3_service import download_file_from_s3, upload_file_to_s3
+from app.services.document_store import get_document_or_404
 from justice_redact.pdf_handler import extract_document
 from justice_redact.pdf_handler.apply import (
     apply_pdf_decisions,
@@ -18,9 +22,6 @@ from app.models.redaction_models import (
 )
 from app.services.file_store import (
     decisions_path,
-    export_pdf_path,
-    vetted_pdf_path,
-    upload_pdf_path,
     write_json,
 )
 
@@ -81,10 +82,16 @@ def apply_redactions_for_document(
 ) -> dict:
     write_json(decisions_path(document_id), request.model_dump())
 
-    pdf_path = upload_pdf_path(document_id)
+    original_filename = get_document_or_404(document_id)["filename"]
 
-    redacted_output_path = export_pdf_path(document_id)
-    vetted_output_path = vetted_pdf_path(document_id)
+    pdf_path = Path("/tmp") / f"{document_id}.pdf"
+    redacted_output_path = Path("/tmp") / f"{document_id}-redacted.pdf"
+    vetted_output_path = Path("/tmp") / f"{document_id}-vetted.pdf"
+
+    download_file_from_s3(
+        original_pdf_key(document_id, original_filename),
+        pdf_path,
+    )
 
     document_model = extract_document(pdf_path)
     typed_decisions = build_pdf_handler_decisions(
@@ -112,9 +119,19 @@ def apply_redactions_for_document(
         output_path=vetted_output_path,
     )
 
+    upload_file_to_s3(
+        redacted_output_path,
+        redacted_pdf_key(document_id),
+    )
+
+    upload_file_to_s3(
+        vetted_output_path,
+        vetted_pdf_key(document_id),
+    )
+
     return {
         "totalDecisionsApplied": len(typed_decisions),
         "decisionTypes": sorted({decision.kind for decision in request.decisions}),
-        "exportPath": str(redacted_output_path),
-        "vettedExportPath": str(vetted_output_path),
+        "exportPath": redacted_pdf_key(document_id),
+        "vettedExportPath": vetted_pdf_key(document_id),
     }
