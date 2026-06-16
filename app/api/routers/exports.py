@@ -1,13 +1,10 @@
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
 from app.services.document_store import get_document_or_404
-from app.services.file_store import (
-    export_pdf_path,
-    vetted_pdf_path,
-    processed_review_path,
-    read_json,
-)
+from app.services.review_result_store import get_review_result
+from app.services.s3_keys import redacted_pdf_key, vetted_pdf_key
+from app.services.s3_service import get_object_from_s3, object_exists_in_s3
 
 router = APIRouter(prefix="/documents", tags=["exports"])
 
@@ -16,20 +13,20 @@ router = APIRouter(prefix="/documents", tags=["exports"])
 async def get_document_export(document_id: str):
     document = get_document_or_404(document_id)
 
-    export_path = export_pdf_path(document_id)
-    vetted_path = vetted_pdf_path(document_id)
+    redacted_key = redacted_pdf_key(document_id)
+    vetted_key = vetted_pdf_key(document_id)
 
-    if not export_path.exists():
+    if not object_exists_in_s3(redacted_key):
         raise HTTPException(status_code=404, detail="Redacted file not found")
 
-    if not vetted_path.exists():
+    if not object_exists_in_s3(vetted_key):
         raise HTTPException(status_code=404, detail="Vetted file not found")
 
     page_count = None
-    processed_path = processed_review_path(document_id)
-    if processed_path.exists():
-        processed_data = read_json(processed_path)
-        page_count = processed_data.get("summary", {}).get("totalPages")
+    review_result = get_review_result(document_id)
+
+    if review_result is not None:
+        page_count = review_result.get("summary", {}).get("totalPages")
 
     return {
         "documentId": document_id,
@@ -45,17 +42,22 @@ async def get_document_export(document_id: str):
 async def download_redacted_file(document_id: str):
     document = get_document_or_404(document_id)
 
-    export_path = export_pdf_path(document_id)
-    if not export_path.exists():
+    key = redacted_pdf_key(document_id)
+
+    if not object_exists_in_s3(key):
         raise HTTPException(status_code=404, detail="Exported file not found")
 
     original_name = document.get("filename", "redacted.pdf")
     download_name = original_name.replace(".pdf", "_redacted.pdf")
 
-    return FileResponse(
-        path=export_path,
+    pdf_bytes = get_object_from_s3(key)
+
+    return Response(
+        content=pdf_bytes,
         media_type="application/pdf",
-        filename=download_name,
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+        },
     )
 
 
@@ -63,16 +65,20 @@ async def download_redacted_file(document_id: str):
 async def download_vetted_file(document_id: str):
     document = get_document_or_404(document_id)
 
-    vetted_path = vetted_pdf_path(document_id)
+    key = vetted_pdf_key(document_id)
 
-    if not vetted_path.exists():
+    if not object_exists_in_s3(key):
         raise HTTPException(status_code=404, detail="Vetted file not found")
 
     original_name = document.get("filename", "vetted.pdf")
     download_name = original_name.replace(".pdf", "_vetted.pdf")
 
-    return FileResponse(
-        path=vetted_path,
+    pdf_bytes = get_object_from_s3(key)
+
+    return Response(
+        content=pdf_bytes,
         media_type="application/pdf",
-        filename=download_name,
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+        },
     )

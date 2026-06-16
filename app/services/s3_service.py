@@ -31,3 +31,14 @@ def get_object_from_s3(key: str) -> bytes:
     )
 
     return response["Body"].read()
+
+
+def object_exists_in_s3(key: str) -> bool:
+    try:
+        s3_client.head_object(
+            Bucket=_BUCKET,
+            Key=key,
+        )
+        return True
+    except s3_client.exceptions.ClientError:
+        return False
