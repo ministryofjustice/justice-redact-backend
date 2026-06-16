@@ -77,17 +77,21 @@ async def process_document_pipeline(document_id: str) -> None:
             review_json=result,
         )
 
+        print(f"Review result stored for document {document_id}", flush=True)
+
         update_document_record(
             document_id,
             status="ready_for_review",
         )
 
-    except Exception as exc:
-        traceback.print_exc()
+        print(f"Document {document_id} marked ready_for_review", flush=True)
 
-        from app.services.document_store import update_document_record
+    except Exception:
+        traceback.print_exc()
 
         update_document_record(
             document_id,
             status="failed",
         )
+
+        print(f"Document {document_id} marked failed", flush=True)
