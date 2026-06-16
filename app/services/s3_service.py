@@ -22,3 +22,12 @@ def download_file_from_s3(key: str, local_path: Path) -> None:
         key,
         str(local_path),
     )
+
+
+def get_object_from_s3(key: str) -> bytes:
+    response = s3_client.get_object(
+        Bucket=_BUCKET,
+        Key=key,
+    )
+
+    return response["Body"].read()
