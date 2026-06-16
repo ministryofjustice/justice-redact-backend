@@ -1,13 +1,12 @@
-import os
 from pathlib import Path
-
 import boto3
+from app.core.settings import settings
 
-_BUCKET = os.environ["S3_BUCKET_NAME"]
+_BUCKET = settings.s3_bucket_name
 
 s3_client = boto3.client(
     "s3",
-    region_name=os.environ["S3_REGION"],
+    region_name=settings.s3_region,
 )
 
 

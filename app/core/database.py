@@ -1,13 +1,14 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-DB_HOST = __import__("os").environ["DB_HOST"]
-DB_NAME = __import__("os").environ["DB_NAME"]
-DB_USERNAME = __import__("os").environ["DB_USERNAME"]
-DB_PASSWORD = __import__("os").environ["DB_PASSWORD"]
+from app.core.settings import settings
 
 DATABASE_URL = (
-    f"postgresql+psycopg://{DB_USERNAME}:{DB_PASSWORD}" f"@{DB_HOST}:5432/{DB_NAME}"
+    f"postgresql+psycopg://"
+    f"{settings.db_username}:"
+    f"{settings.db_password}"
+    f"@{settings.db_host}:5432/"
+    f"{settings.db_name}"
 )
 
 engine = create_engine(

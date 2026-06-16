@@ -11,6 +11,8 @@ dependencies = [
     "justice-redact",
     "sqlalchemy",
     "psycopg[binary]",
+    "python-dotenv>=1.2.2",
+    "pydantic-settings>=2.14.1",
 ]
 
 [dependency-groups]
