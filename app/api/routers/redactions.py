@@ -1,5 +1,5 @@
 import asyncio
-
+import traceback
 from fastapi import APIRouter, HTTPException
 
 from app.models.redaction_models import ApplyRedactionsRequest
@@ -25,7 +25,9 @@ async def apply_redactions_pipeline(
             status="redaction_complete",
         )
 
-    except Exception as exc:
+    except Exception:
+        traceback.print_exc()
+
         update_document_record(
             document_id,
             status="redaction_failed",
