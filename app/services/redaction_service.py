@@ -20,10 +20,6 @@ from app.models.redaction_models import (
     TableRedactionDecision,
     TextRedactionDecision,
 )
-from app.services.file_store import (
-    decisions_path,
-    write_json,
-)
 
 
 def build_pdf_handler_decisions(document_model, decisions):
@@ -80,7 +76,6 @@ def apply_redactions_for_document(
     document_id: str,
     request: ApplyRedactionsRequest,
 ) -> dict:
-    write_json(decisions_path(document_id), request.model_dump())
 
     original_filename = get_document_or_404(document_id)["filename"]
 
