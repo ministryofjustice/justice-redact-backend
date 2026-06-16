@@ -1,7 +1,7 @@
 from justice_redact.detection import detect_for_review
 
 from app.services.document_store import get_document
-from app.services.file_store import processed_review_path, write_json
+from app.services.review_result_store import upsert_review_result
 from app.services.s3_service import download_file_from_s3
 from pathlib import Path
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
@@ -72,7 +72,10 @@ async def process_document_pipeline(document_id: str) -> None:
         result["filename"] = document["filename"]
         result["status"] = "ready_for_review"
 
-        write_json(processed_review_path(document_id), result)
+        upsert_review_result(
+            document_id=document_id,
+            review_json=result,
+        )
 
         document["status"] = "ready_for_review"
 
