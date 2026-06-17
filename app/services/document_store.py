@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from datetime import datetime
 
 from app.core.database import SessionLocal
 from app.models.document import Document
@@ -12,6 +13,29 @@ def document_to_dict(document: Document) -> dict:
         "subjectName": document.subject_name,
         "subjectPrisonNumber": document.subject_prison_number,
         "otherPhrases": document.other_phrases,
+        "createdAt": document.created_at.isoformat() if document.created_at else None,
+        "updatedAt": document.updated_at.isoformat() if document.updated_at else None,
+        "processingStartedAt": (
+            document.processing_started_at.isoformat()
+            if document.processing_started_at
+            else None
+        ),
+        "processingCompletedAt": (
+            document.processing_completed_at.isoformat()
+            if document.processing_completed_at
+            else None
+        ),
+        "redactionStartedAt": (
+            document.redaction_started_at.isoformat()
+            if document.redaction_started_at
+            else None
+        ),
+        "redactionCompletedAt": (
+            document.redaction_completed_at.isoformat()
+            if document.redaction_completed_at
+            else None
+        ),
+        "errorMessage": document.error_message,
     }
 
 
@@ -59,6 +83,12 @@ def update_document_record(
     subject_name: str | None = None,
     subject_prison_number: str | None = None,
     other_phrases: str | None = None,
+    processing_started_at: datetime | None = None,
+    processing_completed_at: datetime | None = None,
+    redaction_started_at: datetime | None = None,
+    redaction_completed_at: datetime | None = None,
+    error_message: str | None = None,
+    clear_error: bool = False,
 ) -> dict:
     with SessionLocal() as session:
         document = session.get(Document, document_id)
@@ -77,6 +107,24 @@ def update_document_record(
 
         if other_phrases is not None:
             document.other_phrases = other_phrases
+
+        if processing_started_at is not None:
+            document.processing_started_at = processing_started_at
+
+        if processing_completed_at is not None:
+            document.processing_completed_at = processing_completed_at
+
+        if redaction_started_at is not None:
+            document.redaction_started_at = redaction_started_at
+
+        if redaction_completed_at is not None:
+            document.redaction_completed_at = redaction_completed_at
+
+        if error_message is not None:
+            document.error_message = error_message
+
+        if clear_error:
+            document.error_message = None
 
         session.commit()
         session.refresh(document)
