@@ -3,6 +3,7 @@ from pathlib import Path
 from app.services.s3_keys import original_pdf_key, redacted_pdf_key, vetted_pdf_key
 from app.services.s3_service import download_file_from_s3, upload_file_to_s3
 from app.services.document_store import get_document_or_404
+from app.services.redaction_decision_store import upsert_redaction_decisions
 from justice_redact.pdf_handler import extract_document
 from justice_redact.pdf_handler.apply import (
     apply_pdf_decisions,
@@ -76,6 +77,11 @@ def apply_redactions_for_document(
     document_id: str,
     request: ApplyRedactionsRequest,
 ) -> dict:
+
+    upsert_redaction_decisions(
+        document_id=document_id,
+        decisions_json=request.model_dump(),
+    )
 
     original_filename = get_document_or_404(document_id)["filename"]
 
