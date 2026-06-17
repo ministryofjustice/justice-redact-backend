@@ -8,7 +8,7 @@ from app.services.document_store import (
     get_document_or_404,
     update_document_record,
 )
-from app.services.file_store import save_upload_file, upload_pdf_path
+from app.services.file_store import save_upload_file
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from fastapi.responses import Response
 from app.services.s3_service import get_object_from_s3
@@ -25,11 +25,12 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
 
     document_id = str(uuid4())
+
     save_upload_file(
-        file,
-        upload_pdf_path(document_id),
-        document_id,
+        file=file,
+        document_id=document_id,
     )
+
     create_document_record(
         document_id=document_id, filename=file.filename or "document.pdf"
     )
