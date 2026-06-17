@@ -1,18 +1,28 @@
-from justice_redact.detection import detect_for_review
-
+from pathlib import Path
+from datetime import datetime, timezone
 from app.services.document_store import get_document, update_document_record
 from app.services.review_result_store import upsert_review_result
 from app.services.s3_service import download_file_from_s3, upload_file_to_s3
 from app.services.s3_keys import preview_image_key
-from pathlib import Path
+from justice_redact.detection import detect_for_review
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
 import traceback
 
 
 async def process_document_pipeline(document_id: str) -> None:
+
     document = get_document(document_id)
+
     if not document:
         return
+
+    update_document_record(
+        document_id,
+        status="processing",
+        processing_started_at=datetime.now(timezone.utc),
+        processing_completed_at=None,
+        clear_error=True,
+    )
 
     try:
         temp_pdf_path = Path("/tmp") / f"{document_id}.pdf"
@@ -93,16 +103,19 @@ async def process_document_pipeline(document_id: str) -> None:
         update_document_record(
             document_id,
             status="ready_for_review",
+            processing_completed_at=datetime.now(timezone.utc),
         )
 
         print(f"Document {document_id} marked ready_for_review", flush=True)
 
-    except Exception:
+    except Exception as exc:
         traceback.print_exc()
 
         update_document_record(
             document_id,
             status="failed",
+            processing_completed_at=datetime.now(timezone.utc),
+            error_message=str(exc),
         )
 
         print(f"Document {document_id} marked failed", flush=True)
