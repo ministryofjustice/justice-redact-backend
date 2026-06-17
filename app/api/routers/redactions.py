@@ -1,5 +1,7 @@
 import asyncio
 import traceback
+
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 
 from app.models.redaction_models import ApplyRedactionsRequest
@@ -23,14 +25,17 @@ async def apply_redactions_pipeline(
         update_document_record(
             document_id,
             status="redaction_complete",
+            redaction_completed_at=datetime.now(timezone.utc),
         )
 
-    except Exception:
+    except Exception as exc:
         traceback.print_exc()
 
         update_document_record(
             document_id,
             status="redaction_failed",
+            redaction_completed_at=datetime.now(timezone.utc),
+            error_message=str(exc),
         )
 
 
@@ -47,6 +52,9 @@ async def apply_redactions(document_id: str, request: ApplyRedactionsRequest):
     update_document_record(
         document_id,
         status="applying_redactions",
+        redaction_started_at=datetime.now(timezone.utc),
+        redaction_completed_at=None,
+        clear_error=True,
     )
 
     asyncio.create_task(
