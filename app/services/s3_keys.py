@@ -12,3 +12,7 @@ def redacted_pdf_key(document_id: str) -> str:
 
 def vetted_pdf_key(document_id: str) -> str:
     return f"documents/{document_id}/exports/vetted.pdf"
+
+
+def exempt_pdf_key(document_id: str) -> str:
+    return f"documents/{document_id}/exports/_exempt.pdf"
