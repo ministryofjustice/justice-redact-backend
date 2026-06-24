@@ -41,6 +41,18 @@ async def upload_document(file: UploadFile = File(...)):
     }
 
 
+async def _run_process_document_pipeline(document_id: str):
+    try:
+        await asyncio.to_thread(process_document_pipeline, document_id)
+    except Exception as exc:
+        update_document_record(
+            document_id,
+            status="failed",
+            error_message=str(exc),
+        )
+        raise
+
+
 @router.post("/{document_id}/process")
 async def process_document(document_id: str, request: ProcessDocumentRequest):
     get_document_or_404(document_id)
@@ -53,7 +65,7 @@ async def process_document(document_id: str, request: ProcessDocumentRequest):
         other_phrases=request.otherPhrases,
     )
 
-    asyncio.create_task(process_document_pipeline(document_id))
+    asyncio.create_task(_run_process_document_pipeline(document_id))
 
     return {
         "documentId": document_id,
