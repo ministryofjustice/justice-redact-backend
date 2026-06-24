@@ -7,10 +7,11 @@ from app.services.s3_keys import preview_image_key
 from justice_redact.detection import detect_for_review
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
 import traceback
+import time
 
 
 async def process_document_pipeline(document_id: str) -> None:
-
+    pipeline_start = time.perf_counter()
     document = get_document(document_id)
 
     if not document:
@@ -27,9 +28,16 @@ async def process_document_pipeline(document_id: str) -> None:
     try:
         temp_pdf_path = Path("/tmp") / f"{document_id}.pdf"
 
+        start = time.perf_counter()
+
         download_file_from_s3(
             f"documents/{document_id}/original/{document['filename']}",
             temp_pdf_path,
+        )
+
+        print(
+            f"[TIMING] download_file_from_s3: {time.perf_counter() - start:.2f}s",
+            flush=True,
         )
 
         pdf_path = str(temp_pdf_path)
@@ -40,6 +48,8 @@ async def process_document_pipeline(document_id: str) -> None:
             if phrase.strip()
         ]
 
+        start = time.perf_counter()
+
         result = detect_for_review(
             pdf_path=pdf_path,
             subject_name=document["subjectName"],
@@ -47,8 +57,16 @@ async def process_document_pipeline(document_id: str) -> None:
             other_phrases=other_phrases_list,
         )
 
+        print(
+            f"[TIMING] detect_for_review: {time.perf_counter() - start:.2f}s",
+            flush=True,
+        )
+
         image_preview_dir = Path("/tmp") / "processed" / document_id / "images"
         image_preview_dir.mkdir(parents=True, exist_ok=True)
+
+        preview_count = 0
+        start = time.perf_counter()
 
         for page in result.get("pages", []):
             for image in page.get("images", []):
@@ -85,17 +103,32 @@ async def process_document_pipeline(document_id: str) -> None:
                     preview_key,
                 )
 
+                preview_count += 1
+
                 image["imageUrl"] = (
                     f"/documents/{document_id}/images/{image['imageId']}.png"
                 )
+
+        print(
+            f"[TIMING] preview_generation_and_upload ({preview_count} previews): "
+            f"{time.perf_counter() - start:.2f}s",
+            flush=True,
+        )
 
         result["documentId"] = document_id
         result["filename"] = document["filename"]
         result["status"] = "ready_for_review"
 
+        start = time.perf_counter()
+
         upsert_review_result(
             document_id=document_id,
             review_json=result,
+        )
+
+        print(
+            f"[TIMING] upsert_review_result: {time.perf_counter() - start:.2f}s",
+            flush=True,
         )
 
         print(f"Review result stored for document {document_id}", flush=True)
@@ -104,6 +137,12 @@ async def process_document_pipeline(document_id: str) -> None:
             document_id,
             status="ready_for_review",
             processing_completed_at=datetime.now(timezone.utc),
+        )
+
+        print(
+            f"[TIMING] process_document_pipeline TOTAL: "
+            f"{time.perf_counter() - pipeline_start:.2f}s",
+            flush=True,
         )
 
         print(f"Document {document_id} marked ready_for_review", flush=True)
