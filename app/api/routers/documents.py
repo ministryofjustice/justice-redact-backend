@@ -1,4 +1,3 @@
-import asyncio
 from uuid import uuid4
 
 from app.models.document_requests import ProcessDocumentRequest
@@ -9,7 +8,7 @@ from app.services.document_store import (
     update_document_record,
 )
 from app.services.file_store import save_upload_file
-from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.responses import Response
 from app.services.s3_service import get_object_from_s3
 from app.services.s3_keys import preview_image_key
@@ -41,20 +40,12 @@ async def upload_document(file: UploadFile = File(...)):
     }
 
 
-async def _run_process_document_pipeline(document_id: str):
-    try:
-        await asyncio.to_thread(process_document_pipeline, document_id)
-    except Exception as exc:
-        update_document_record(
-            document_id,
-            status="failed",
-            error_message=str(exc),
-        )
-        raise
-
-
 @router.post("/{document_id}/process")
-async def process_document(document_id: str, request: ProcessDocumentRequest):
+async def process_document(
+    document_id: str,
+    request: ProcessDocumentRequest,
+    background_tasks: BackgroundTasks,
+):
     get_document_or_404(document_id)
 
     update_document_record(
@@ -65,7 +56,7 @@ async def process_document(document_id: str, request: ProcessDocumentRequest):
         other_phrases=request.otherPhrases,
     )
 
-    asyncio.create_task(_run_process_document_pipeline(document_id))
+    background_tasks.add_task(process_document_pipeline, document_id)
 
     return {
         "documentId": document_id,
