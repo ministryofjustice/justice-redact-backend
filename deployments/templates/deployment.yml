@@ -22,6 +22,13 @@ spec:
           image: ${IMAGE}
           ports:
             - containerPort: 8080
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: 1
+              memory: 2Gi
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
@@ -62,4 +69,3 @@ spec:
             # Value is injected by envsubst from AP_ACCOUNT_ID in the workflow.
             - name: AP_COMPREHEND_ROLE_ARN
               value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
- 
