@@ -25,4 +25,4 @@ system-certs = true
 package = false
 
 [tool.uv.sources]
-justice-redact = { git = "https://github.com/moj-analytical-services/justice-redact.git", rev = "2d6ec054ace402e38bd1bde83104554c5db5caed" }
+justice-redact = { git = "https://github.com/moj-analytical-services/justice-redact.git", rev = "b0229233ab53c5d2ed4657104629a86682cffd4b" }
