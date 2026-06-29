@@ -193,7 +193,7 @@ def apply_redactions_for_document(
     apply_pdf_decisions(
         document=document_model,
         pdf_path=pdf_path,
-        decisions=typed_decisions,
+        resolved_decisions=resolved_decisions,
         output_path=redacted_output_path,
         excluded_page_numbers=redacted_excluded_page_numbers,
     )
@@ -206,7 +206,7 @@ def apply_redactions_for_document(
     apply_vetted_pdf_highlights(
         document=document_model,
         pdf_path=pdf_path,
-        decisions=typed_decisions,
+        resolved_decisions=resolved_decisions,
         output_path=vetted_output_path,
         excluded_page_numbers=vetted_excluded_page_numbers,
     )
