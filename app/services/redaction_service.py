@@ -29,6 +29,7 @@ from justice_redact.pdf_handler.decisions import (
     TableTextSpanDecision,
     TextSpanDecision,
 )
+from justice_redact.pdf_handler.resolution.resolve_any import resolve_pdf_decisions_once
 
 
 def build_pdf_handler_decisions(document_model, decisions):
@@ -155,6 +156,17 @@ def apply_redactions_for_document(
     )
     print(
         f"[REDACTION_TIMING] build_pdf_handler_decisions={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
+
+    start = time.perf_counter()
+    resolved_decisions = resolve_pdf_decisions_once(
+        document=document_model,
+        decisions=typed_decisions,
+    )
+    print(
+        f"[REDACTION_TIMING] resolve_pdf_decisions_once={time.perf_counter() - start:.2f}s "
+        f"typed_decisions={len(typed_decisions)} resolved={len(resolved_decisions)}",
         flush=True,
     )
 
