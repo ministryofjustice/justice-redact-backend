@@ -16,3 +16,7 @@ def vetted_pdf_key(document_id: str) -> str:
 
 def exempt_pdf_key(document_id: str) -> str:
     return f"documents/{document_id}/exports/_exempt.pdf"
+
+
+def document_geometry_key(document_id: str) -> str:
+    return f"documents/{document_id}/geometry/document.json"

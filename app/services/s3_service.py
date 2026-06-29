@@ -1,5 +1,6 @@
 from pathlib import Path
 import boto3
+import json
 from app.core.settings import settings
 
 _BUCKET = settings.s3_bucket_name
@@ -42,3 +43,21 @@ def object_exists_in_s3(key: str) -> bool:
         return True
     except s3_client.exceptions.ClientError:
         return False
+
+
+def upload_json_to_s3(data: dict, key: str) -> None:
+    s3_client.put_object(
+        Bucket=_BUCKET,
+        Key=key,
+        Body=json.dumps(data).encode("utf-8"),
+        ContentType="application/json",
+    )
+
+
+def download_json_from_s3(key: str) -> dict:
+    response = s3_client.get_object(
+        Bucket=_BUCKET,
+        Key=key,
+    )
+
+    return json.loads(response["Body"].read())

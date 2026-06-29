@@ -2,6 +2,7 @@ from pathlib import Path
 import time
 from fastapi import HTTPException
 
+from justice_redact.pdf_handler.models import Document
 from app.models.redaction_models import (
     ApplyRedactionsRequest,
     ImageRedactionDecision,
@@ -12,13 +13,17 @@ from app.models.redaction_models import (
 from app.services.document_store import get_document_or_404
 from app.services.redaction_decision_store import upsert_redaction_decisions
 from app.services.s3_keys import (
+    document_geometry_key,
     exempt_pdf_key,
     original_pdf_key,
     redacted_pdf_key,
     vetted_pdf_key,
 )
-from app.services.s3_service import download_file_from_s3, upload_file_to_s3
-from justice_redact.pdf_handler import extract_document
+from app.services.s3_service import (
+    download_file_from_s3,
+    download_json_from_s3,
+    upload_file_to_s3,
+)
 from justice_redact.pdf_handler.apply import (
     apply_pdf_decisions,
     apply_vetted_pdf_highlights,
@@ -32,14 +37,14 @@ from justice_redact.pdf_handler.decisions import (
 from justice_redact.pdf_handler.resolution.resolve_any import resolve_pdf_decisions_once
 
 
-def build_pdf_handler_decisions(document_model, decisions):
+def build_pdf_handler_decisions(document_id: str, decisions):
     typed_decisions = []
 
     for decision in decisions:
         if isinstance(decision, TextRedactionDecision):
             typed_decisions.append(
                 TextSpanDecision(
-                    document_id=document_model.document_id,
+                    document_id=document_id,
                     page_number=decision.pageNumber,
                     item_id=decision.itemId,
                     start=decision.start,
@@ -54,7 +59,7 @@ def build_pdf_handler_decisions(document_model, decisions):
         if isinstance(decision, TableRedactionDecision):
             typed_decisions.append(
                 TableTextSpanDecision(
-                    document_id=document_model.document_id,
+                    document_id=document_id,
                     page_number=decision.pageNumber,
                     table_id=decision.tableId,
                     cell_id=decision.cellId,
@@ -70,7 +75,7 @@ def build_pdf_handler_decisions(document_model, decisions):
         if isinstance(decision, ImageRedactionDecision):
             typed_decisions.append(
                 ImageRegionDecision(
-                    document_id=document_model.document_id,
+                    document_id=document_id,
                     page_number=decision.pageNumber,
                     image_id=decision.imageId,
                     source=decision.source,
@@ -143,15 +148,22 @@ def apply_redactions_for_document(
     )
 
     start = time.perf_counter()
-    document_model = extract_document(pdf_path)
+
+    document_geometry = download_json_from_s3(
+        document_geometry_key(document_id),
+    )
+
+    document_model = Document.model_validate(document_geometry)
+    document_model.source_path = str(pdf_path)
+
     print(
-        f"[REDACTION_TIMING] extract_document={time.perf_counter() - start:.2f}s",
+        f"[REDACTION_TIMING] load_document_geometry={time.perf_counter() - start:.2f}s",
         flush=True,
     )
 
     start = time.perf_counter()
     typed_decisions = build_pdf_handler_decisions(
-        document_model=document_model,
+        document_id=document_id,
         decisions=request.decisions,
     )
     print(

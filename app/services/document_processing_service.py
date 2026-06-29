@@ -2,9 +2,16 @@ from pathlib import Path
 from datetime import datetime, timezone
 from app.services.document_store import get_document, update_document_record
 from app.services.review_result_store import upsert_review_result
-from app.services.s3_service import download_file_from_s3, upload_file_to_s3
-from app.services.s3_keys import preview_image_key
-from justice_redact.detection import detect_for_review
+from app.services.s3_service import (
+    download_file_from_s3,
+    upload_file_to_s3,
+    upload_json_to_s3,
+)
+from app.services.s3_keys import (
+    document_geometry_key,
+    preview_image_key,
+)
+from justice_redact.detection.review import detect_for_review_with_document
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
 import traceback
 import time
@@ -50,7 +57,7 @@ async def process_document_pipeline(document_id: str) -> None:
 
         start = time.perf_counter()
 
-        result = detect_for_review(
+        result, document_model = detect_for_review_with_document(
             pdf_path=pdf_path,
             subject_name=document["subjectName"],
             subject_prison_number=document["subjectPrisonNumber"],
@@ -59,6 +66,18 @@ async def process_document_pipeline(document_id: str) -> None:
 
         print(
             f"[TIMING] detect_for_review: {time.perf_counter() - start:.2f}s",
+            flush=True,
+        )
+
+        start = time.perf_counter()
+
+        upload_json_to_s3(
+            document_model.model_dump(),
+            document_geometry_key(document_id),
+        )
+
+        print(
+            f"[TIMING] upload_document_geometry: {time.perf_counter() - start:.2f}s",
             flush=True,
         )
 
