@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 from fastapi import HTTPException
 
 from app.models.redaction_models import (
@@ -106,30 +107,58 @@ def apply_redactions_for_document(
     document_id: str,
     request: ApplyRedactionsRequest,
 ) -> dict:
+    pipeline_start = time.perf_counter()
+
+    start = time.perf_counter()
     upsert_redaction_decisions(
         document_id=document_id,
         decisions_json=request.model_dump(),
     )
+    print(
+        f"[REDACTION_TIMING] upsert_redaction_decisions={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
+    start = time.perf_counter()
     original_filename = get_document_or_404(document_id)["filename"]
+    print(
+        f"[REDACTION_TIMING] get_document={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
     pdf_path = Path("/tmp") / f"{document_id}.pdf"
     redacted_output_path = Path("/tmp") / f"{document_id}-redacted.pdf"
     vetted_output_path = Path("/tmp") / f"{document_id}-vetted.pdf"
     exempt_output_path = Path("/tmp") / f"{document_id}-exempt.pdf"
 
+    start = time.perf_counter()
     download_file_from_s3(
         original_pdf_key(document_id, original_filename),
         pdf_path,
     )
+    print(
+        f"[REDACTION_TIMING] download_file_from_s3={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
+    start = time.perf_counter()
     document_model = extract_document(pdf_path)
+    print(
+        f"[REDACTION_TIMING] extract_document={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
+    start = time.perf_counter()
     typed_decisions = build_pdf_handler_decisions(
         document_model=document_model,
         decisions=request.decisions,
     )
+    print(
+        f"[REDACTION_TIMING] build_pdf_handler_decisions={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
+    start = time.perf_counter()
     page_decisions = build_page_decisions(request.decisions)
     exempt_page_numbers = page_decisions["exempt_page_numbers"]
     deleted_page_numbers = page_decisions["deleted_page_numbers"]
@@ -137,6 +166,10 @@ def apply_redactions_for_document(
         set(exempt_page_numbers + deleted_page_numbers)
     )
     vetted_excluded_page_numbers = exempt_page_numbers
+    print(
+        f"[REDACTION_TIMING] build_page_decisions={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
     if not typed_decisions and not exempt_page_numbers and not deleted_page_numbers:
         raise HTTPException(
@@ -144,6 +177,7 @@ def apply_redactions_for_document(
             detail="No valid redaction or page decisions could be built",
         )
 
+    start = time.perf_counter()
     apply_pdf_decisions(
         document=document_model,
         pdf_path=pdf_path,
@@ -151,7 +185,12 @@ def apply_redactions_for_document(
         output_path=redacted_output_path,
         excluded_page_numbers=redacted_excluded_page_numbers,
     )
+    print(
+        f"[REDACTION_TIMING] apply_pdf_decisions={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
+    start = time.perf_counter()
     apply_vetted_pdf_highlights(
         document=document_model,
         pdf_path=pdf_path,
@@ -159,29 +198,58 @@ def apply_redactions_for_document(
         output_path=vetted_output_path,
         excluded_page_numbers=vetted_excluded_page_numbers,
     )
+    print(
+        f"[REDACTION_TIMING] apply_vetted_pdf_highlights={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
     if exempt_page_numbers:
+        start = time.perf_counter()
         create_exempt_pdf(
             pdf_path=pdf_path,
             output_path=exempt_output_path,
             exempt_page_numbers=exempt_page_numbers,
         )
+        print(
+            f"[REDACTION_TIMING] create_exempt_pdf={time.perf_counter() - start:.2f}s",
+            flush=True,
+        )
 
+    start = time.perf_counter()
     upload_file_to_s3(
         redacted_output_path,
         redacted_pdf_key(document_id),
     )
+    print(
+        f"[REDACTION_TIMING] upload_redacted_pdf={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
+    start = time.perf_counter()
     upload_file_to_s3(
         vetted_output_path,
         vetted_pdf_key(document_id),
     )
+    print(
+        f"[REDACTION_TIMING] upload_vetted_pdf={time.perf_counter() - start:.2f}s",
+        flush=True,
+    )
 
     if exempt_page_numbers:
+        start = time.perf_counter()
         upload_file_to_s3(
             exempt_output_path,
             exempt_pdf_key(document_id),
         )
+        print(
+            f"[REDACTION_TIMING] upload_exempt_pdf={time.perf_counter() - start:.2f}s",
+            flush=True,
+        )
+
+    print(
+        f"[REDACTION_TIMING] apply_redactions_for_document_TOTAL={time.perf_counter() - pipeline_start:.2f}s",
+        flush=True,
+    )
 
     return {
         "totalDecisionsApplied": len(typed_decisions),
