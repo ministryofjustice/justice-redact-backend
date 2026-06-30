@@ -13,7 +13,8 @@ from app.models.redaction_models import (
 from app.services.document_store import get_document_or_404
 from app.services.redaction_decision_store import upsert_redaction_decisions
 from app.services.s3_keys import (
-    document_geometry_key,
+    document_geometry_chunk_key,
+    document_geometry_manifest_key,
     exempt_pdf_key,
     original_pdf_key,
     redacted_pdf_key,
@@ -109,6 +110,35 @@ def build_page_decisions(decisions):
     }
 
 
+def get_chunk_for_page(manifest: dict, page_number: int) -> dict | None:
+    for chunk in manifest.get("chunks", []):
+        if chunk["pageStart"] <= page_number <= chunk["pageEnd"]:
+            return chunk
+
+    return None
+
+
+def group_decisions_by_chunk(
+    manifest: dict,
+    typed_decisions: list,
+) -> dict[int, list]:
+    grouped: dict[int, list] = {}
+
+    for decision in typed_decisions:
+        chunk = get_chunk_for_page(
+            manifest=manifest,
+            page_number=decision.page_number,
+        )
+
+        if chunk is None:
+            continue
+
+        chunk_index = chunk["chunkIndex"]
+        grouped.setdefault(chunk_index, []).append(decision)
+
+    return grouped
+
+
 def apply_redactions_for_document(
     document_id: str,
     request: ApplyRedactionsRequest,
@@ -149,15 +179,13 @@ def apply_redactions_for_document(
 
     start = time.perf_counter()
 
-    document_geometry = download_json_from_s3(
-        document_geometry_key(document_id),
+    manifest = download_json_from_s3(
+        document_geometry_manifest_key(document_id),
     )
 
-    document_model = Document.model_validate(document_geometry)
-    document_model.source_path = str(pdf_path)
-
     print(
-        f"[REDACTION_TIMING] load_document_geometry={time.perf_counter() - start:.2f}s",
+        f"[REDACTION_TIMING] load_document_geometry_manifest={time.perf_counter() - start:.2f}s "
+        f"chunks={len(manifest.get('chunks', []))} total_pages={manifest.get('totalPages')}",
         flush=True,
     )
 
@@ -172,13 +200,57 @@ def apply_redactions_for_document(
     )
 
     start = time.perf_counter()
-    resolved_decisions = resolve_pdf_decisions_once(
-        document=document_model,
-        decisions=typed_decisions,
+
+    decisions_by_chunk = group_decisions_by_chunk(
+        manifest=manifest,
+        typed_decisions=typed_decisions,
     )
+
+    resolved_decisions = []
+
+    for chunk_index, chunk_decisions in sorted(decisions_by_chunk.items()):
+        chunk_start = time.perf_counter()
+
+        chunk_geometry = download_json_from_s3(
+            document_geometry_chunk_key(document_id, chunk_index),
+        )
+
+        chunk_document = Document.model_validate(chunk_geometry)
+        chunk_document.source_path = str(pdf_path)
+
+        chunk_resolved_decisions = resolve_pdf_decisions_once(
+            document=chunk_document,
+            decisions=chunk_decisions,
+        )
+
+        resolved_decisions.extend(chunk_resolved_decisions)
+
+        print(
+            f"[REDACTION_TIMING] resolve_pdf_decisions_chunk "
+            f"chunk={chunk_index} "
+            f"decisions={len(chunk_decisions)} "
+            f"resolved={len(chunk_resolved_decisions)} "
+            f"time={time.perf_counter() - chunk_start:.2f}s",
+            flush=True,
+        )
+
+        del chunk_geometry
+        del chunk_document
+        del chunk_resolved_decisions
+
+    unresolved_count = len(typed_decisions) - len(resolved_decisions)
+
+    if unresolved_count:
+        print(
+            f"[REDACTION_TIMING] unresolved_decisions={unresolved_count}",
+            flush=True,
+        )
+
     print(
         f"[REDACTION_TIMING] resolve_pdf_decisions_once={time.perf_counter() - start:.2f}s "
-        f"typed_decisions={len(typed_decisions)} resolved={len(resolved_decisions)}",
+        f"typed_decisions={len(typed_decisions)} "
+        f"resolved={len(resolved_decisions)} "
+        f"chunks_loaded={len(decisions_by_chunk)}",
         flush=True,
     )
 
@@ -203,7 +275,7 @@ def apply_redactions_for_document(
 
     start = time.perf_counter()
     apply_pdf_decisions(
-        document=document_model,
+        document=None,
         pdf_path=pdf_path,
         resolved_decisions=resolved_decisions,
         output_path=redacted_output_path,
@@ -216,7 +288,7 @@ def apply_redactions_for_document(
 
     start = time.perf_counter()
     apply_vetted_pdf_highlights(
-        document=document_model,
+        document=None,
         pdf_path=pdf_path,
         resolved_decisions=resolved_decisions,
         output_path=vetted_output_path,

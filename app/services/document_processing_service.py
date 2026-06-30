@@ -1,4 +1,5 @@
 from pathlib import Path
+import pymupdf
 from datetime import datetime, timezone
 from app.services.document_store import get_document, update_document_record
 from app.services.review_result_store import upsert_review_result
@@ -8,13 +9,47 @@ from app.services.s3_service import (
     upload_json_to_s3,
 )
 from app.services.s3_keys import (
-    document_geometry_key,
+    document_geometry_chunk_key,
+    document_geometry_manifest_key,
     preview_image_key,
 )
-from justice_redact.detection.review import detect_for_review_with_document
+from justice_redact.detection.runtime import build_detection_runtime
+from justice_redact.detection.review import detect_for_review_chunk_with_document
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
 import traceback
 import time
+
+
+PDF_PROCESSING_CHUNK_SIZE = 100
+
+
+def get_pdf_page_count(pdf_path: Path) -> int:
+    doc = pymupdf.open(str(pdf_path))
+
+    try:
+        return doc.page_count
+    finally:
+        doc.close()
+
+
+def build_page_chunks(total_pages: int, chunk_size: int) -> list[dict]:
+    chunks = []
+
+    for chunk_index, page_start in enumerate(
+        range(1, total_pages + 1, chunk_size),
+        start=1,
+    ):
+        page_end = min(page_start + chunk_size - 1, total_pages)
+
+        chunks.append(
+            {
+                "chunkIndex": chunk_index,
+                "pageStart": page_start,
+                "pageEnd": page_end,
+            }
+        )
+
+    return chunks
 
 
 async def process_document_pipeline(document_id: str) -> None:
@@ -47,6 +82,18 @@ async def process_document_pipeline(document_id: str) -> None:
             flush=True,
         )
 
+        page_count = get_pdf_page_count(temp_pdf_path)
+        chunks = build_page_chunks(
+            total_pages=page_count,
+            chunk_size=PDF_PROCESSING_CHUNK_SIZE,
+        )
+
+        print(
+            f"[TIMING] chunk_plan total_pages={page_count} "
+            f"chunk_size={PDF_PROCESSING_CHUNK_SIZE} chunks={len(chunks)}",
+            flush=True,
+        )
+
         pdf_path = str(temp_pdf_path)
 
         other_phrases_list = [
@@ -57,86 +104,166 @@ async def process_document_pipeline(document_id: str) -> None:
 
         start = time.perf_counter()
 
-        result, document_model = detect_for_review_with_document(
-            pdf_path=pdf_path,
+        detection_runtime = build_detection_runtime(
             subject_name=document["subjectName"],
             subject_prison_number=document["subjectPrisonNumber"],
-            other_phrases=other_phrases_list,
+            extra_allow_list=other_phrases_list,
         )
 
         print(
-            f"[TIMING] detect_for_review: {time.perf_counter() - start:.2f}s",
+            f"[TIMING] build_detection_runtime: {time.perf_counter() - start:.2f}s",
             flush=True,
         )
 
-        start = time.perf_counter()
-
-        upload_json_to_s3(
-            document_model.model_dump(),
-            document_geometry_key(document_id),
-        )
-
-        print(
-            f"[TIMING] upload_document_geometry: {time.perf_counter() - start:.2f}s",
-            flush=True,
-        )
+        combined_pages = []
+        combined_findings = []
+        total_text_items = 0
 
         image_preview_dir = Path("/tmp") / "processed" / document_id / "images"
         image_preview_dir.mkdir(parents=True, exist_ok=True)
 
         preview_count = 0
+
+        for chunk in chunks:
+            chunk_index = chunk["chunkIndex"]
+            page_start = chunk["pageStart"]
+            page_end = chunk["pageEnd"]
+
+            chunk_start = time.perf_counter()
+
+            chunk_result, chunk_document = detect_for_review_chunk_with_document(
+                pdf_path=pdf_path,
+                page_start=page_start,
+                page_end=page_end,
+                total_page_count=page_count,
+                subject_name=document["subjectName"],
+                subject_prison_number=document["subjectPrisonNumber"],
+                other_phrases=other_phrases_list,
+                runtime=detection_runtime,
+            )
+
+            print(
+                f"[TIMING] detect_for_review_chunk "
+                f"chunk={chunk_index}/{len(chunks)} "
+                f"pages={page_start}-{page_end} "
+                f"time={time.perf_counter() - chunk_start:.2f}s",
+                flush=True,
+            )
+
+            start = time.perf_counter()
+
+            upload_json_to_s3(
+                chunk_document.model_dump(),
+                document_geometry_chunk_key(document_id, chunk_index),
+            )
+
+            print(
+                f"[TIMING] upload_document_geometry_chunk "
+                f"chunk={chunk_index}/{len(chunks)} "
+                f"time={time.perf_counter() - start:.2f}s",
+                flush=True,
+            )
+
+            combined_pages.extend(chunk_result.get("pages", []))
+
+            for finding in chunk_result.get("findings", []):
+                finding["id"] = f"finding_{len(combined_findings) + 1:06d}"
+                combined_findings.append(finding)
+
+            total_text_items += chunk_result.get("summary", {}).get(
+                "totalTextItems",
+                0,
+            )
+
+            start = time.perf_counter()
+
+            for page in chunk_result.get("pages", []):
+                for image in page.get("images", []):
+                    bbox = image.get("bbox")
+
+                    if not bbox:
+                        continue
+
+                    output_path = image_preview_dir / f"{image['imageId']}.png"
+
+                    render_pdf_region_to_png(
+                        pdf_path=pdf_path,
+                        page_number=page["pageNumber"],
+                        bbox=type(
+                            "BBoxLike",
+                            (),
+                            {
+                                "x0": bbox["x0"],
+                                "y0": bbox["y0"],
+                                "x1": bbox["x1"],
+                                "y1": bbox["y1"],
+                            },
+                        )(),
+                        output_path=output_path,
+                    )
+
+                    preview_key = preview_image_key(
+                        document_id,
+                        image["imageId"],
+                    )
+
+                    upload_file_to_s3(
+                        output_path,
+                        preview_key,
+                    )
+
+                    preview_count += 1
+
+                    image["imageUrl"] = (
+                        f"/documents/{document_id}/images/{image['imageId']}.png"
+                    )
+
+            print(
+                f"[TIMING] preview_generation_and_upload_chunk "
+                f"chunk={chunk_index}/{len(chunks)} "
+                f"time={time.perf_counter() - start:.2f}s",
+                flush=True,
+            )
+
+            del chunk_result
+            del chunk_document
+
+        manifest = {
+            "chunkSize": PDF_PROCESSING_CHUNK_SIZE,
+            "totalPages": page_count,
+            "chunks": chunks,
+        }
+
         start = time.perf_counter()
 
-        for page in result.get("pages", []):
-            for image in page.get("images", []):
-                bbox = image.get("bbox")
-
-                if not bbox:
-                    continue
-
-                output_path = image_preview_dir / f"{image['imageId']}.png"
-
-                render_pdf_region_to_png(
-                    pdf_path=pdf_path,
-                    page_number=page["pageNumber"],
-                    bbox=type(
-                        "BBoxLike",
-                        (),
-                        {
-                            "x0": bbox["x0"],
-                            "y0": bbox["y0"],
-                            "x1": bbox["x1"],
-                            "y1": bbox["y1"],
-                        },
-                    )(),
-                    output_path=output_path,
-                )
-
-                preview_key = preview_image_key(
-                    document_id,
-                    image["imageId"],
-                )
-
-                upload_file_to_s3(
-                    output_path,
-                    preview_key,
-                )
-
-                preview_count += 1
-
-                image["imageUrl"] = (
-                    f"/documents/{document_id}/images/{image['imageId']}.png"
-                )
+        upload_json_to_s3(
+            manifest,
+            document_geometry_manifest_key(document_id),
+        )
 
         print(
-            f"[TIMING] preview_generation_and_upload ({preview_count} previews): "
+            f"[TIMING] upload_document_geometry_manifest: "
             f"{time.perf_counter() - start:.2f}s",
             flush=True,
         )
 
-        result["documentId"] = document_id
-        result["filename"] = document["filename"]
-        result["status"] = "ready_for_review"
+        result = {
+            "summary": {
+                "totalPages": page_count,
+                "totalTextItems": total_text_items,
+                "totalFindings": len(combined_findings),
+            },
+            "subjectDetails": {
+                "subjectName": document["subjectName"] or "",
+                "subjectPrisonNumber": document["subjectPrisonNumber"] or "",
+                "otherPhrases": other_phrases_list,
+            },
+            "pages": combined_pages,
+            "findings": combined_findings,
+            "documentId": document_id,
+            "filename": document["filename"],
+            "status": "ready_for_review",
+        }
 
         start = time.perf_counter()
 

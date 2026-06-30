@@ -20,3 +20,11 @@ def exempt_pdf_key(document_id: str) -> str:
 
 def document_geometry_key(document_id: str) -> str:
     return f"documents/{document_id}/geometry/document.json"
+
+
+def document_geometry_manifest_key(document_id: str) -> str:
+    return f"documents/{document_id}/geometry/manifest.json"
+
+
+def document_geometry_chunk_key(document_id: str, chunk_index: int) -> str:
+    return f"documents/{document_id}/geometry/chunks/{chunk_index:04d}.json"
