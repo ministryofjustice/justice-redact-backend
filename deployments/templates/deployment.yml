@@ -20,8 +20,19 @@ spec:
       containers:
         - name: app
           image: ${IMAGE}
+          # Fix: Prevents tag caching and forces verification against registry
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
+          
+          # Fix: Target your FastAPI health check router prefix path cleanly - Hothyfa, can you please check, uncomment and update path, as necessary?
+          # livenessProbe:
+          #   httpGet:
+          #     path: /api/health
+          #     port: 8080
+          #   initialDelaySeconds: 15
+          #   periodSeconds: 20
+
           resources:
             requests:
               cpu: 250m
@@ -29,6 +40,17 @@ spec:
             limits:
               cpu: 1
               memory: 2Gi
+          
+          # Applied Security Configuration (Fixes all remaining Snyk alerts)
+          securityContext:
+            allowPrivilegeEscalation: false 
+            runAsNonRoot: true             
+            runAsUser: 10001               
+            readOnlyRootFilesystem: true   
+            capabilities:                  
+              drop:
+                - ALL
+
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
