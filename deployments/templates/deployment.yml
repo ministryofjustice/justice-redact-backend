@@ -40,16 +40,20 @@ spec:
             limits:
               cpu: 1
               memory: 2Gi
-          
+
           # Applied Security Configuration (Fixes all remaining Snyk alerts)
           securityContext:
-            allowPrivilegeEscalation: false 
-            runAsNonRoot: true             
-            runAsUser: 10001               
-            readOnlyRootFilesystem: true   
-            capabilities:                  
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            readOnlyRootFilesystem: true
+            capabilities:
               drop:
                 - ALL
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
 
           env:
             - name: PYTHONUNBUFFERED
@@ -91,3 +95,7 @@ spec:
             # Value is injected by envsubst from AP_ACCOUNT_ID in the workflow.
             - name: AP_COMPREHEND_ROLE_ARN
               value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
