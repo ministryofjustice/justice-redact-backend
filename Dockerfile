@@ -5,8 +5,8 @@ ENV TZ=Europe/London
 
 RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
 
-RUN groupadd --gid 2000 --system appgroup && \
-    useradd --uid 2000 --system appuser --gid 2000
+RUN groupadd --gid 10001 --system appgroup && \
+    useradd --uid 10001 --system appuser --gid 10001
 
 WORKDIR /app
 
@@ -48,7 +48,7 @@ ENV PYTHONPATH=/app
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8080
-USER 2000
+USER 10001
 
 ENTRYPOINT []
 
