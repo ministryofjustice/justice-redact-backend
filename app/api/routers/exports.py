@@ -10,7 +10,11 @@ from app.services.s3_service import get_object_from_s3, object_exists_in_s3
 router = APIRouter(prefix="/documents", tags=["exports"])
 
 
-def _count_page_decisions(decision_set: dict | None, action: str) -> int:
+def _count_page_decisions(
+    decision_set: dict | None,
+    action: str,
+    total_pages: int,
+) -> int:
     decisions = decision_set.get("decisions", []) if decision_set else []
 
     return len(
@@ -19,7 +23,8 @@ def _count_page_decisions(decision_set: dict | None, action: str) -> int:
             for decision in decisions
             if decision.get("kind") == "page"
             and decision.get("action") == action
-            and decision.get("pageNumber") is not None
+            and isinstance(decision.get("pageNumber"), int)
+            and 1 <= decision.get("pageNumber") <= total_pages
         }
     )
 
@@ -49,8 +54,12 @@ async def get_document_export(document_id: str):
     decision_set = get_redaction_decisions(document_id)
 
     original_page_count = page_count or 0
-    exempt_page_count = _count_page_decisions(decision_set, "exempt")
-    deleted_page_count = _count_page_decisions(decision_set, "delete")
+    exempt_page_count = _count_page_decisions(
+        decision_set, "exempt", original_page_count
+    )
+    deleted_page_count = _count_page_decisions(
+        decision_set, "delete", original_page_count
+    )
     redacted_page_count = max(
         original_page_count - exempt_page_count - deleted_page_count,
         0,
