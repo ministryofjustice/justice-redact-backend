@@ -2,11 +2,26 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from app.services.document_store import get_document_or_404
+from app.services.redaction_decision_store import get_redaction_decisions
 from app.services.review_result_store import get_review_result
 from app.services.s3_keys import exempt_pdf_key, redacted_pdf_key, vetted_pdf_key
 from app.services.s3_service import get_object_from_s3, object_exists_in_s3
 
 router = APIRouter(prefix="/documents", tags=["exports"])
+
+
+def _count_page_decisions(decision_set: dict | None, action: str) -> int:
+    decisions = decision_set.get("decisions", []) if decision_set else []
+
+    return len(
+        {
+            decision.get("pageNumber")
+            for decision in decisions
+            if decision.get("kind") == "page"
+            and decision.get("action") == action
+            and decision.get("pageNumber") is not None
+        }
+    )
 
 
 @router.get("/{document_id}/export")
@@ -31,6 +46,16 @@ async def get_document_export(document_id: str):
     if review_result is not None:
         page_count = review_result.get("summary", {}).get("totalPages")
 
+    decision_set = get_redaction_decisions(document_id)
+
+    original_page_count = page_count or 0
+    exempt_page_count = _count_page_decisions(decision_set, "exempt")
+    deleted_page_count = _count_page_decisions(decision_set, "delete")
+    redacted_page_count = max(
+        original_page_count - exempt_page_count - deleted_page_count,
+        0,
+    )
+
     return {
         "documentId": document_id,
         "filename": document["filename"],
@@ -41,6 +66,12 @@ async def get_document_export(document_id: str):
             f"{router.prefix}/{document_id}/exempt-file" if exempt_exists else None
         ),
         "pageCount": page_count,
+        "pageCounts": {
+            "original": original_page_count,
+            "exempt": exempt_page_count,
+            "deleted": deleted_page_count,
+            "redacted": redacted_page_count,
+        },
     }
 
 
