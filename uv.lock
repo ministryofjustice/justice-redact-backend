@@ -403,7 +403,7 @@ wheels = [
 [[package]]
 name = "justice-redact"
 version = "0.1.0"
-source = { git = "https://github.com/moj-analytical-services/justice-redact.git?rev=f92bf664f19512075607c9f869ef7e2c623a32cd#f92bf664f19512075607c9f869ef7e2c623a32cd" }
+source = { git = "https://github.com/moj-analytical-services/justice-redact.git?rev=98bc80c89abefed148c2760381d54e25a686dab0#98bc80c89abefed148c2760381d54e25a686dab0" }
 dependencies = [
     { name = "boto3" },
     { name = "en-core-web-sm" },
@@ -437,7 +437,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi" },
-    { name = "justice-redact", git = "https://github.com/moj-analytical-services/justice-redact.git?rev=f92bf664f19512075607c9f869ef7e2c623a32cd" },
+    { name = "justice-redact", git = "https://github.com/moj-analytical-services/justice-redact.git?rev=98bc80c89abefed148c2760381d54e25a686dab0" },
     { name = "psycopg", extras = ["binary"] },
     { name = "pydantic" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
