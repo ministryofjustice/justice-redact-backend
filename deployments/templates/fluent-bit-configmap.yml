@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+  namespace: ${NAMESPACE} # Deploys the ConfigMap into the specified namespace via variable substitution
+data:
+  # ==========================================
+  # MAIN FLUENT BIT CONFIGURATION
+  # ==========================================
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush         5             # Flushes/writes data to the output plugin every 5 seconds
+        Log_Level     info          # Sets the logging verbosity for Fluent Bit itself (error, warn, info, debug)
+        Parsers_File  parsers.conf  # References the external parsers file defined lower down in this ConfigMap
+        Storage.path  /var/log/flb-storage # Directory for buffer mechanisms (e.g., buffering logs to disk)
+
+    [INPUT]
+        Name              tail                 # Uses the 'tail' plugin to read logs from the end of a file (like `tail -f`)
+        Path              /var/log/app/app.log # The specific path of the application log file to monitor
+        Parser            json                 # Applies the 'json' parser (defined in parsers.conf) to structure raw text logs
+        Tag               backend.*            # Tags all logs from this input; used for routing logs to filters and outputs
+        Refresh_Interval  5                    # Checks for new files matching the path pattern every 5 seconds
+        DB                /var/log/flb-storage/tail.db # SQLite database to track file offsets so it doesn't duplicate logs on restart
+
+    # Adds pod/namespace metadata so events are filterable in OpenSearch
+    [FILTER]
+        Name    modify                            # Uses the 'modify' plugin to alter log records (add, remove, or change fields)
+        Match   backend.*                         # Only applies this filter to logs tagged with 'backend.*'
+        Add     kubernetes_namespace ${NAMESPACE} # Appends a new JSON key-value pair for the namespace
+        Add     app justice-redact-backend        # Appends a static JSON key-value pair for the app name
+
+    [OUTPUT]
+        Name                 opensearch               # Routes logs to an OpenSearch destination
+        Match                backend.*                # Only ships logs that match the 'backend.*' tag
+        Host                 ${OPENSEARCH_PROXY_HOST} # OpenSearch cluster or proxy endpoint hostname
+        Port                 ${OPENSEARCH_PROXY_PORT} # Port number where OpenSearch is listening
+        Index                justice-redact-backend   # The target index name where logs will be stored in OpenSearch
+        Suppress_Type_Name   On                       # Removes mapping types (required for compatibility with modern Elasticsearch/OpenSearch)
+        tls                  Off                      # Disables TLS encryption for data in transit (useful if hitting a local sidecar or proxy)
+        Retry_Limit          5                        # Maximum number of retry attempts if OpenSearch rejects or drops the connection
+
+  # ==========================================
+  # PARSERS DEFINITION
+  # ==========================================
+  parsers.conf: |
+    [PARSER]
+        Name    json                    # The identifier used by the INPUT section (`Parser json`)
+        Format  json                    # Instructs Fluent Bit to decode incoming log lines as native JSON objects

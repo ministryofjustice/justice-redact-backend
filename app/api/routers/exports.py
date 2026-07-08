@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
+from app.logging_config import logger
 from app.services.document_store import get_document_or_404
 from app.services.redaction_decision_store import get_redaction_decisions
 from app.services.review_result_store import get_review_result
@@ -38,9 +39,28 @@ async def get_document_export(document_id: str):
     exempt_key = exempt_pdf_key(document_id)
 
     if not object_exists_in_s3(redacted_key):
+        # "reason" field lets these three distinct failure cases be told
+        # apart in OpenSearch even though they share the same event name
+        # and status code.
+        logger.warning(
+            "document_export_failed",
+            extra={
+                "event": "document_export_failed",
+                "reason": "redacted_file_not_found",
+                "document_id": document_id,
+            },
+        )
         raise HTTPException(status_code=404, detail="Redacted file not found")
 
     if not object_exists_in_s3(vetted_key):
+        logger.warning(
+            "document_export_failed",
+            extra={
+                "event": "document_export_failed",
+                "reason": "vetted_file_not_found",
+                "document_id": document_id,
+            },
+        )
         raise HTTPException(status_code=404, detail="Vetted file not found")
 
     exempt_exists = object_exists_in_s3(exempt_key)
@@ -63,6 +83,22 @@ async def get_document_export(document_id: str):
     redacted_page_count = max(
         original_page_count - exempt_page_count - deleted_page_count,
         0,
+    )
+
+    # Success event, logged once all three files are confirmed present and
+    # page counts are computed - gives a per-export audit trail of exactly
+    # how many pages were exempted/deleted/redacted.
+    logger.info(
+        "document_export_generated",
+        extra={
+            "event": "document_export_generated",
+            "document_id": document_id,
+            "original_page_count": original_page_count,
+            "exempt_page_count": exempt_page_count,
+            "deleted_page_count": deleted_page_count,
+            "redacted_page_count": redacted_page_count,
+            "exempt_file_included": exempt_exists,
+        },
     )
 
     return {
@@ -98,6 +134,17 @@ async def download_redacted_file(document_id: str):
 
     pdf_bytes = get_object_from_s3(key)
 
+    # "file_kind" distinguishes this from the vetted-file/exempt-file
+    # download events below, which share the same event name.
+    logger.info(
+        "document_file_downloaded",
+        extra={
+            "event": "document_file_downloaded",
+            "document_id": document_id,
+            "file_kind": "redacted",
+        },
+    )
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -121,6 +168,15 @@ async def download_vetted_file(document_id: str):
 
     pdf_bytes = get_object_from_s3(key)
 
+    logger.info(
+        "document_file_downloaded",
+        extra={
+            "event": "document_file_downloaded",
+            "document_id": document_id,
+            "file_kind": "vetted",
+        },
+    )
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -143,6 +199,15 @@ async def download_exempt_file(document_id: str):
     download_name = original_name.replace(".pdf", "_exempt.pdf")
 
     pdf_bytes = get_object_from_s3(key)
+
+    logger.info(
+        "document_file_downloaded",
+        extra={
+            "event": "document_file_downloaded",
+            "document_id": document_id,
+            "file_kind": "exempt",
+        },
+    )
 
     return Response(
         content=pdf_bytes,
