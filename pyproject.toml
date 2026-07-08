@@ -13,6 +13,7 @@ dependencies = [
     "psycopg[binary]",
     "python-dotenv>=1.2.2",
     "pydantic-settings>=2.14.1",
+    "python-json-logger>=2.0.7", # Added for Opensearch logging 
 ]
 
 [dependency-groups]
