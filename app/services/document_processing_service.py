@@ -1,6 +1,7 @@
 from pathlib import Path
 import pymupdf
 from datetime import datetime, timezone
+from app.logging_config import logger
 from app.services.document_store import get_document, update_document_record
 from app.services.review_result_store import upsert_review_result
 from app.services.s3_service import (
@@ -16,11 +17,39 @@ from app.services.s3_keys import (
 from justice_redact.detection.runtime import build_detection_runtime
 from justice_redact.detection.review import detect_for_review_chunk_with_document
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
-import traceback
 import time
 
 
 PDF_PROCESSING_CHUNK_SIZE = 100
+
+
+def _log_stage(stage: str, document_id: str, duration_s: float, **extra) -> None:
+    """
+    Central helper so every pipeline stage logs the same shape (previously
+    each stage had its own `print(f"[TIMING] ...")` line - this replaces
+    all of them with one structured event per stage, filterable by `stage`
+    in OpenSearch).
+
+    IMPORTANT: this function - and every logger call in this file - must
+    NEVER be passed subjectName, subjectPrisonNumber, or otherPhrases via
+    **extra. This pipeline processes the most sensitive data in the whole
+    service (a person's identity and prison number); logging it into
+    OpenSearch, a separate data store with its own retention/access
+    characteristics from the primary RDS/S3 data, should be a deliberate,
+    reviewed decision - not a side-effect of adding observability. This is
+    enforced here by simply never passing those fields in, at every call
+    site below.
+    """
+    logger.info(
+        "document_processing_stage",
+        extra={
+            "event": "document_processing_stage",
+            "stage": stage,
+            "document_id": document_id,
+            "duration_ms": round(duration_s * 1000, 2),
+            **extra,
+        },
+    )
 
 
 def get_pdf_page_count(pdf_path: Path) -> int:
@@ -53,10 +82,36 @@ def build_page_chunks(total_pages: int, chunk_size: int) -> list[dict]:
 
 
 async def process_document_pipeline(document_id: str) -> None:
+    """
+    Background task (kicked off via asyncio.create_task from
+    app/api/routers/documents.py's /process endpoint) that downloads the
+    original PDF, runs detection in page chunks, renders preview images,
+    and stores the combined review result.
+
+    Logging strategy: every stage that was previously a `print(f"[TIMING]
+    ...")` line now goes through _log_stage (see docstring above for why
+    subject details are never included). Pipeline-level start/completion/
+    failure get their own dedicated events in addition to the per-stage
+    timing events, so both "how long did this take" and "did it succeed"
+    are independently queryable in OpenSearch.
+    """
     pipeline_start = time.perf_counter()
     document = get_document(document_id)
 
     if not document:
+        # Previously this branch logged nothing at all - a silent early
+        # return. Now it's visible as a distinct event, since a document ID
+        # not found here likely indicates a bug (the route already checked
+        # get_document_or_404 before scheduling this task) or a race
+        # condition (document deleted between scheduling and running).
+        logger.warning(
+            "document_processing_skipped",
+            extra={
+                "event": "document_processing_skipped",
+                "reason": "document_not_found",
+                "document_id": document_id,
+            },
+        )
         return
 
     update_document_record(
@@ -77,10 +132,7 @@ async def process_document_pipeline(document_id: str) -> None:
             temp_pdf_path,
         )
 
-        print(
-            f"[TIMING] download_file_from_s3: {time.perf_counter() - start:.2f}s",
-            flush=True,
-        )
+        _log_stage("download_file_from_s3", document_id, time.perf_counter() - start)
 
         page_count = get_pdf_page_count(temp_pdf_path)
         chunks = build_page_chunks(
@@ -88,10 +140,16 @@ async def process_document_pipeline(document_id: str) -> None:
             chunk_size=PDF_PROCESSING_CHUNK_SIZE,
         )
 
-        print(
-            f"[TIMING] chunk_plan total_pages={page_count} "
-            f"chunk_size={PDF_PROCESSING_CHUNK_SIZE} chunks={len(chunks)}",
-            flush=True,
+        # duration is 0 here since this stage is just building a plan, not
+        # doing timed work - kept as a _log_stage call anyway so the chunk
+        # plan (page/chunk counts) is visible in the same event stream.
+        _log_stage(
+            "chunk_plan",
+            document_id,
+            0,
+            total_pages=page_count,
+            chunk_size=PDF_PROCESSING_CHUNK_SIZE,
+            chunk_count=len(chunks),
         )
 
         pdf_path = str(temp_pdf_path)
@@ -104,15 +162,19 @@ async def process_document_pipeline(document_id: str) -> None:
 
         start = time.perf_counter()
 
+        # NOTE: subjectName/subjectPrisonNumber are passed to
+        # build_detection_runtime as required for it to actually do its
+        # job (detecting mentions of the subject to redact) - that's
+        # different from logging them. No logger call anywhere near this
+        # includes them.
         detection_runtime = build_detection_runtime(
             subject_name=document["subjectName"],
             subject_prison_number=document["subjectPrisonNumber"],
             extra_allow_list=other_phrases_list,
         )
 
-        print(
-            f"[TIMING] build_detection_runtime: {time.perf_counter() - start:.2f}s",
-            flush=True,
+        _log_stage(
+            "build_detection_runtime", document_id, time.perf_counter() - start
         )
 
         combined_pages = []
@@ -142,12 +204,14 @@ async def process_document_pipeline(document_id: str) -> None:
                 runtime=detection_runtime,
             )
 
-            print(
-                f"[TIMING] detect_for_review_chunk "
-                f"chunk={chunk_index}/{len(chunks)} "
-                f"pages={page_start}-{page_end} "
-                f"time={time.perf_counter() - chunk_start:.2f}s",
-                flush=True,
+            _log_stage(
+                "detect_for_review_chunk",
+                document_id,
+                time.perf_counter() - chunk_start,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                page_start=page_start,
+                page_end=page_end,
             )
 
             start = time.perf_counter()
@@ -157,11 +221,12 @@ async def process_document_pipeline(document_id: str) -> None:
                 document_geometry_chunk_key(document_id, chunk_index),
             )
 
-            print(
-                f"[TIMING] upload_document_geometry_chunk "
-                f"chunk={chunk_index}/{len(chunks)} "
-                f"time={time.perf_counter() - start:.2f}s",
-                flush=True,
+            _log_stage(
+                "upload_document_geometry_chunk",
+                document_id,
+                time.perf_counter() - start,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
             )
 
             combined_pages.extend(chunk_result.get("pages", []))
@@ -218,11 +283,12 @@ async def process_document_pipeline(document_id: str) -> None:
                         f"/documents/{document_id}/images/{image['imageId']}.png"
                     )
 
-            print(
-                f"[TIMING] preview_generation_and_upload_chunk "
-                f"chunk={chunk_index}/{len(chunks)} "
-                f"time={time.perf_counter() - start:.2f}s",
-                flush=True,
+            _log_stage(
+                "preview_generation_and_upload_chunk",
+                document_id,
+                time.perf_counter() - start,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
             )
 
             del chunk_result
@@ -241,12 +307,16 @@ async def process_document_pipeline(document_id: str) -> None:
             document_geometry_manifest_key(document_id),
         )
 
-        print(
-            f"[TIMING] upload_document_geometry_manifest: "
-            f"{time.perf_counter() - start:.2f}s",
-            flush=True,
+        _log_stage(
+            "upload_document_geometry_manifest",
+            document_id,
+            time.perf_counter() - start,
         )
 
+        # NOTE: this result dict (stored via upsert_review_result, not
+        # logged) does include subjectName/subjectPrisonNumber under
+        # "subjectDetails" - that's the existing, unchanged storage path
+        # into review_result_store, a separate concern from logging.
         result = {
             "summary": {
                 "totalPages": page_count,
@@ -272,12 +342,7 @@ async def process_document_pipeline(document_id: str) -> None:
             review_json=result,
         )
 
-        print(
-            f"[TIMING] upsert_review_result: {time.perf_counter() - start:.2f}s",
-            flush=True,
-        )
-
-        print(f"Review result stored for document {document_id}", flush=True)
+        _log_stage("upsert_review_result", document_id, time.perf_counter() - start)
 
         update_document_record(
             document_id,
@@ -285,16 +350,41 @@ async def process_document_pipeline(document_id: str) -> None:
             processing_completed_at=datetime.now(timezone.utc),
         )
 
-        print(
-            f"[TIMING] process_document_pipeline TOTAL: "
-            f"{time.perf_counter() - pipeline_start:.2f}s",
-            flush=True,
+        # Pipeline-level success event, distinct from the per-stage timing
+        # events above - lets you query "how many documents finished
+        # processing" and "what's the overall pipeline duration trend"
+        # without having to reconstruct it from individual stage events.
+        logger.info(
+            "document_processing_completed",
+            extra={
+                "event": "document_processing_completed",
+                "document_id": document_id,
+                "total_pages": page_count,
+                "total_text_items": total_text_items,
+                "total_findings": len(combined_findings),
+                "preview_count": preview_count,
+                "duration_ms": round((time.perf_counter() - pipeline_start) * 1000, 2),
+            },
         )
 
-        print(f"Document {document_id} marked ready_for_review", flush=True)
-
     except Exception as exc:
-        traceback.print_exc()
+        # logger.exception attaches the full traceback as structured data
+        # (exc_info=True set automatically) - previously this was
+        # traceback.print_exc(), plain text to stderr, invisible to the
+        # JSON/Fluent Bit pipeline. Deliberately no subjectName/
+        # subjectPrisonNumber here either - only document_id and the
+        # exception's string representation.
+        logger.exception(
+            "document_processing_failed",
+            extra={
+                "event": "document_processing_failed",
+                "document_id": document_id,
+                "error": str(exc),
+                "duration_ms": round(
+                    (time.perf_counter() - pipeline_start) * 1000, 2
+                ),
+            },
+        )
 
         update_document_record(
             document_id,
@@ -302,5 +392,3 @@ async def process_document_pipeline(document_id: str) -> None:
             processing_completed_at=datetime.now(timezone.utc),
             error_message=str(exc),
         )
-
-        print(f"Document {document_id} marked failed", flush=True)

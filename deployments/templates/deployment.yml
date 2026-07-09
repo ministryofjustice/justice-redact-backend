@@ -54,6 +54,14 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # Shared with the fluent-bit sidecar container below. The app
+            # writes structured JSON logs here (see app/logging_config.py);
+            # fluent-bit tails this same path (read-only) and ships each
+            # line to OpenSearch. This indirection via a shared emptyDir is
+            # necessary because sidecar containers don't have direct
+            # visibility into each other's stdout.
+            - name: logs
+              mountPath: /var/log/app
 
           env:
             - name: PYTHONUNBUFFERED
@@ -96,6 +104,78 @@ spec:
             - name: AP_COMPREHEND_ROLE_ARN
               value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
 
+        # --- Fluent Bit sidecar ---
+        # Tails the shared app.log file (written by the app container above)
+        # and ships each structured log entry to the OpenSearch domain via
+        # the in-cluster opensearch-proxy Service, which handles AWS auth
+        # so this container doesn't need AWS credentials of its own.
+        - name: fluent-bit
+          image: fluent/fluent-bit:3.1
+          imagePullPolicy: Always
+          env:
+            # Sourced from the opensearch-output secret, which is created
+            # and kept up to date by opensearch.tf in the
+            # cloud-platform-environments repo. Using env vars (rather than
+            # hardcoding the proxy Service name in fluent-bit-configmap.yml)
+            # means this always points at the current proxy Service, even
+            # if the OpenSearch domain is recreated and the proxy Service
+            # gets a new hash suffix - no manual update needed here, just a
+            # pod restart to pick up the refreshed secret value.
+            - name: OPENSEARCH_PROXY_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: opensearch-output
+                  key: proxy_host
+            - name: OPENSEARCH_PROXY_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: opensearch-output
+                  key: proxy_port
+          resources:
+            # Deliberately small - this container only tails and forwards
+            # a text file, it does no heavy processing.
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            # fluent/fluent-bit images run as uid 1000 by default - this
+            # must match or the container will fail to start with a
+            # permissions error against readOnlyRootFilesystem.
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            # Read-only: this container only ever reads the app's log
+            # file, never writes to it.
+            - name: logs
+              mountPath: /var/log/app
+              readOnly: true
+            # fluent-bit.conf and parsers.conf, defined in
+            # fluent-bit-configmap.yml.
+            - name: fluent-bit-config
+              mountPath: /fluent-bit/etc
+            # Fluent Bit's tail input plugin needs a writable location to
+            # persist its "how far through the file have I read" position
+            # (the DB file referenced in fluent-bit-configmap.yml's INPUT
+            # block) - required because readOnlyRootFilesystem is true
+            # above, so it can't write anywhere else in the container.
+            - name: fluent-bit-storage
+              mountPath: /var/log/flb-storage
+
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+        - name: fluent-bit-config
+          configMap:
+            name: fluent-bit-config
+        - name: fluent-bit-storage
           emptyDir: {}
