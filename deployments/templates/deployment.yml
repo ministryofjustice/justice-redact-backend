@@ -41,12 +41,22 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 20
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
           resources:
             requests:
-              cpu: 250m
+              cpu: 1
               memory: 1Gi
             limits:
-              cpu: 1
+              cpu: 2
               memory: 2Gi
 
           # Applied Security Configuration (Fixes all remaining Snyk alerts)
