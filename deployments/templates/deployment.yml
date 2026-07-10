@@ -3,36 +3,37 @@ kind: Deployment
 metadata:
   name: justice-redact-backend
   namespace: ${NAMESPACE}
+
 spec:
   replicas: 2
+
   selector:
     matchLabels:
       app: justice-redact-backend
+
   template:
     metadata:
       labels:
         app: justice-redact-backend
+
     spec:
-      # IRSA service account provides pod-level AWS credentials for S3 access.
-      # Named justice-redact-<env> (e.g. justice-redact-dev, justice-redact-staging)
-      # provisioned by the irsa module in cloud-platform-environments.
+      # Apply the restricted-compatible seccomp profile to all pod containers.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Use the environment-specific IRSA service account for AWS access.
       serviceAccountName: ${SERVICE_ACCOUNT}
+
       containers:
         - name: app
           image: ${IMAGE}
-          # Fix: Prevents tag caching and forces verification against registry
           imagePullPolicy: Always
+
           ports:
             - containerPort: 8080
-          # Fix: Target your FastAPI health check router prefix path cleanly - Hothyfa, can you please check, uncomment and update path, as necessary?
-          # livenessProbe:
-          #   httpGet:
-          #     path: /health
-          #     port: 8080
-          #   initialDelaySeconds: 15
-          #   periodSeconds: 20
-          #   timeoutSeconds: 5
-          #   failureThreshold: 3
+
+          # Allow long processing operations before treating the application as unhealthy.
           livenessProbe:
             httpGet:
               path: /health
@@ -42,6 +43,7 @@ spec:
             timeoutSeconds: 10
             failureThreshold: 20
 
+          # Remove unresponsive application pods from service traffic promptly.
           readinessProbe:
             httpGet:
               path: /health
@@ -51,15 +53,17 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
             successThreshold: 1
+
+          # Provide sufficient temporary capacity for CPU-intensive PDF processing.
           resources:
             requests:
-              cpu: 1
+              cpu: "1"
               memory: 1Gi
             limits:
-              cpu: 2
+              cpu: "2"
               memory: 2Gi
 
-          # Applied Security Configuration (Fixes all remaining Snyk alerts)
+          # Run the application as a restricted non-root container.
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
@@ -70,130 +74,123 @@ spec:
                 - ALL
 
           volumeMounts:
+            # Provide writable temporary storage for the read-only container.
             - name: tmp
               mountPath: /tmp
-            # Shared with the fluent-bit sidecar container below. The app
-            # writes structured JSON logs here (see app/logging_config.py);
-            # fluent-bit tails this same path (read-only) and ships each
-            # line to OpenSearch. This indirection via a shared emptyDir is
-            # necessary because sidecar containers don't have direct
-            # visibility into each other's stdout.
+
+            # Share structured application logs with the Fluent Bit sidecar.
             - name: logs
               mountPath: /var/log/app
 
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
-            # S3 configuration — bucket name and region injected from the
-            # Kubernetes secret created by the s3_bucket terraform module
+
+            # Load the S3 bucket name from the environment-specific secret.
             - name: S3_BUCKET_NAME
               valueFrom:
                 secretKeyRef:
                   name: s3-bucket-output
                   key: bucket_name
+
             - name: S3_REGION
               value: "eu-west-2"
-            # RDS configuration — credentials injected from the Kubernetes secret
-            # created by the rds terraform module (dev only; add to staging when provisioned)
+
+            # Load the PostgreSQL connection details from the RDS secret.
             - name: DB_HOST
               valueFrom:
                 secretKeyRef:
                   name: rds-postgresql-instance-output
                   key: rds_instance_address
+
             - name: DB_NAME
               valueFrom:
                 secretKeyRef:
                   name: rds-postgresql-instance-output
                   key: database_name
+
             - name: DB_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: rds-postgresql-instance-output
                   key: database_username
+
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: rds-postgresql-instance-output
                   key: database_password
-            # ADDED: ARN of the cross-account IAM role in the Analytical Platform
-            # AWS account that grants AWS Comprehend access. The pod assumes this
-            # role via STS using the IRSA credentials bound to ${SERVICE_ACCOUNT}.
-            # Value is injected by envsubst from AP_ACCOUNT_ID in the workflow.
+
+            # Allow the backend to assume the Analytical Platform Comprehend role.
             - name: AP_COMPREHEND_ROLE_ARN
               value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
 
-        # --- Fluent Bit sidecar ---
-        # Tails the shared app.log file (written by the app container above)
-        # and ships each structured log entry to the OpenSearch domain via
-        # the in-cluster opensearch-proxy Service, which handles AWS auth
-        # so this container doesn't need AWS credentials of its own.
         - name: fluent-bit
           image: fluent/fluent-bit:3.1
           imagePullPolicy: Always
+
+          # Load the in-cluster OpenSearch proxy connection details.
           env:
-            # Sourced from the opensearch-output secret, which is created
-            # and kept up to date by opensearch.tf in the
-            # cloud-platform-environments repo. Using env vars (rather than
-            # hardcoding the proxy Service name in fluent-bit-configmap.yml)
-            # means this always points at the current proxy Service, even
-            # if the OpenSearch domain is recreated and the proxy Service
-            # gets a new hash suffix - no manual update needed here, just a
-            # pod restart to pick up the refreshed secret value.
             - name: OPENSEARCH_PROXY_HOST
               valueFrom:
                 secretKeyRef:
                   name: opensearch-output
                   key: proxy_host
+
             - name: OPENSEARCH_PROXY_PORT
               valueFrom:
                 secretKeyRef:
                   name: opensearch-output
                   key: proxy_port
+
+          # Allocate lightweight resources for log forwarding.
           resources:
-            # Deliberately small - this container only tails and forwards
-            # a text file, it does no heavy processing.
             requests:
               cpu: 50m
               memory: 64Mi
             limits:
               cpu: 200m
               memory: 128Mi
+
+          # Run Fluent Bit as a restricted non-root container.
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
-            # fluent/fluent-bit images run as uid 1000 by default - this
-            # must match or the container will fail to start with a
-            # permissions error against readOnlyRootFilesystem.
             runAsUser: 1000
             readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+
           volumeMounts:
-            # Read-only: this container only ever reads the app's log
-            # file, never writes to it.
+            # Read application logs without allowing the sidecar to modify them.
             - name: logs
               mountPath: /var/log/app
               readOnly: true
-            # fluent-bit.conf and parsers.conf, defined in
-            # fluent-bit-configmap.yml.
+
+            # Mount the Fluent Bit configuration files.
             - name: fluent-bit-config
               mountPath: /fluent-bit/etc
-            # Fluent Bit's tail input plugin needs a writable location to
-            # persist its "how far through the file have I read" position
-            # (the DB file referenced in fluent-bit-configmap.yml's INPUT
-            # block) - required because readOnlyRootFilesystem is true
-            # above, so it can't write anywhere else in the container.
+              readOnly: true
+
+            # Provide writable storage for Fluent Bit tail offsets and buffering.
             - name: fluent-bit-storage
               mountPath: /var/log/flb-storage
 
       volumes:
+        # Provide temporary writable storage for application processing.
         - name: tmp
           emptyDir: {}
+
+        # Share the application log file between containers.
         - name: logs
           emptyDir: {}
+
+        # Load the Fluent Bit configuration from the namespace ConfigMap.
         - name: fluent-bit-config
           configMap:
             name: fluent-bit-config
+
+        # Persist Fluent Bit offsets for the lifetime of the pod.
         - name: fluent-bit-storage
           emptyDir: {}
