@@ -20,6 +20,8 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 @router.post("/upload")
 async def upload_document(file: UploadFile = File(...)):
+    uploaded_filename = file.filename or "document.pdf"
+
     if file.content_type != "application/pdf":
         logger.warning(
             "document_upload_rejected",
@@ -27,16 +29,7 @@ async def upload_document(file: UploadFile = File(...)):
                 "event": "document_upload_rejected",
                 "reason": "invalid_content_type",
                 "content_type": file.content_type,
-                # NOTE: filename is logged here (and in document_uploaded
-                # below) because it's needed to debug upload issues, but
-                # original filenames may themselves contain identifying
-                # information (e.g. a person's name or case reference).
-                # Confirm this is acceptable under this service's data
-                # protection review before relying on it in production -
-                # see the note in document_processing_service.py for why
-                # subject name/prison number are handled differently
-                # (never logged at all).
-                "filename": file.filename,
+                "uploaded_filename": uploaded_filename,
             },
         )
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
@@ -49,7 +42,8 @@ async def upload_document(file: UploadFile = File(...)):
     )
 
     create_document_record(
-        document_id=document_id, filename=file.filename or "document.pdf"
+        document_id=document_id,
+        filename=uploaded_filename,
     )
 
     logger.info(
@@ -57,7 +51,7 @@ async def upload_document(file: UploadFile = File(...)):
         extra={
             "event": "document_uploaded",
             "document_id": document_id,
-            "filename": file.filename or "document.pdf",
+            "uploaded_filename": uploaded_filename,
         },
     )
 
