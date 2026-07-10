@@ -25,14 +25,22 @@ spec:
           ports:
             - containerPort: 8080
           # Fix: Target your FastAPI health check router prefix path cleanly - Hothyfa, can you please check, uncomment and update path, as necessary?
+          # livenessProbe:
+          #   httpGet:
+          #     path: /health
+          #     port: 8080
+          #   initialDelaySeconds: 15
+          #   periodSeconds: 20
+          #   timeoutSeconds: 5
+          #   failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 15
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 20
           resources:
             requests:
               cpu: 250m
