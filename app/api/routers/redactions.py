@@ -26,7 +26,8 @@ async def apply_redactions_pipeline(
     start = time.time()
 
     try:
-        apply_redactions_for_document(
+        await asyncio.to_thread(
+            apply_redactions_for_document,
             document_id=document_id,
             request=request,
         )
