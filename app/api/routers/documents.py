@@ -1,6 +1,4 @@
-import asyncio
 from uuid import uuid4
-
 from app.logging_config import logger
 from app.models.document_requests import ProcessDocumentRequest
 from app.services.document_processing_service import process_document_pipeline
@@ -10,7 +8,7 @@ from app.services.document_store import (
     update_document_record,
 )
 from app.services.file_store import save_upload_file
-from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from app.services.s3_service import get_object_from_s3
 from app.services.s3_keys import preview_image_key
@@ -62,7 +60,11 @@ async def upload_document(file: UploadFile = File(...)):
 
 
 @router.post("/{document_id}/process")
-async def process_document(document_id: str, request: ProcessDocumentRequest):
+async def process_document(
+    document_id: str,
+    request: ProcessDocumentRequest,
+    background_tasks: BackgroundTasks,
+):
     get_document_or_404(document_id)
 
     update_document_record(
@@ -73,11 +75,6 @@ async def process_document(document_id: str, request: ProcessDocumentRequest):
         other_phrases=request.otherPhrases,
     )
 
-    # Logged here (request-accepted) as well as at the start of
-    # process_document_pipeline in document_processing_service.py, since
-    # that pipeline runs as a fire-and-forget background task - this event
-    # confirms the request was accepted even if the background task is
-    # slow to start.
     logger.info(
         "document_processing_started",
         extra={
@@ -86,7 +83,7 @@ async def process_document(document_id: str, request: ProcessDocumentRequest):
         },
     )
 
-    asyncio.create_task(process_document_pipeline(document_id))
+    background_tasks.add_task(process_document_pipeline, document_id)
 
     return {
         "documentId": document_id,
@@ -104,9 +101,7 @@ async def get_document_image_preview(document_id: str, image_id: str):
     try:
         image_bytes = get_object_from_s3(key)
     except Exception:
-        # Warning, not exception/error - a missing preview image is an
-        # expected occurrence (e.g. still processing) rather than a bug,
-        # so no need for a full stack trace here.
+
         logger.warning(
             "document_image_preview_not_found",
             extra={

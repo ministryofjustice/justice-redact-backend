@@ -81,7 +81,7 @@ def build_page_chunks(total_pages: int, chunk_size: int) -> list[dict]:
     return chunks
 
 
-async def process_document_pipeline(document_id: str) -> None:
+def process_document_pipeline(document_id: str) -> None:
     """
     Background task (kicked off via asyncio.create_task from
     app/api/routers/documents.py's /process endpoint) that downloads the
@@ -99,11 +99,7 @@ async def process_document_pipeline(document_id: str) -> None:
     document = get_document(document_id)
 
     if not document:
-        # Previously this branch logged nothing at all - a silent early
-        # return. Now it's visible as a distinct event, since a document ID
-        # not found here likely indicates a bug (the route already checked
-        # get_document_or_404 before scheduling this task) or a race
-        # condition (document deleted between scheduling and running).
+
         logger.warning(
             "document_processing_skipped",
             extra={
@@ -140,9 +136,6 @@ async def process_document_pipeline(document_id: str) -> None:
             chunk_size=PDF_PROCESSING_CHUNK_SIZE,
         )
 
-        # duration is 0 here since this stage is just building a plan, not
-        # doing timed work - kept as a _log_stage call anyway so the chunk
-        # plan (page/chunk counts) is visible in the same event stream.
         _log_stage(
             "chunk_plan",
             document_id,
@@ -162,20 +155,13 @@ async def process_document_pipeline(document_id: str) -> None:
 
         start = time.perf_counter()
 
-        # NOTE: subjectName/subjectPrisonNumber are passed to
-        # build_detection_runtime as required for it to actually do its
-        # job (detecting mentions of the subject to redact) - that's
-        # different from logging them. No logger call anywhere near this
-        # includes them.
         detection_runtime = build_detection_runtime(
             subject_name=document["subjectName"],
             subject_prison_number=document["subjectPrisonNumber"],
             extra_allow_list=other_phrases_list,
         )
 
-        _log_stage(
-            "build_detection_runtime", document_id, time.perf_counter() - start
-        )
+        _log_stage("build_detection_runtime", document_id, time.perf_counter() - start)
 
         combined_pages = []
         combined_findings = []
@@ -313,10 +299,6 @@ async def process_document_pipeline(document_id: str) -> None:
             time.perf_counter() - start,
         )
 
-        # NOTE: this result dict (stored via upsert_review_result, not
-        # logged) does include subjectName/subjectPrisonNumber under
-        # "subjectDetails" - that's the existing, unchanged storage path
-        # into review_result_store, a separate concern from logging.
         result = {
             "summary": {
                 "totalPages": page_count,
@@ -350,10 +332,6 @@ async def process_document_pipeline(document_id: str) -> None:
             processing_completed_at=datetime.now(timezone.utc),
         )
 
-        # Pipeline-level success event, distinct from the per-stage timing
-        # events above - lets you query "how many documents finished
-        # processing" and "what's the overall pipeline duration trend"
-        # without having to reconstruct it from individual stage events.
         logger.info(
             "document_processing_completed",
             extra={
@@ -368,21 +346,14 @@ async def process_document_pipeline(document_id: str) -> None:
         )
 
     except Exception as exc:
-        # logger.exception attaches the full traceback as structured data
-        # (exc_info=True set automatically) - previously this was
-        # traceback.print_exc(), plain text to stderr, invisible to the
-        # JSON/Fluent Bit pipeline. Deliberately no subjectName/
-        # subjectPrisonNumber here either - only document_id and the
-        # exception's string representation.
+
         logger.exception(
             "document_processing_failed",
             extra={
                 "event": "document_processing_failed",
                 "document_id": document_id,
                 "error": str(exc),
-                "duration_ms": round(
-                    (time.perf_counter() - pipeline_start) * 1000, 2
-                ),
+                "duration_ms": round((time.perf_counter() - pipeline_start) * 1000, 2),
             },
         )
 
