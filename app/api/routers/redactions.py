@@ -1,8 +1,7 @@
-import asyncio
 import time
 
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.logging_config import logger
 from app.models.redaction_models import ApplyRedactionsRequest
@@ -12,7 +11,7 @@ from app.services.redaction_service import apply_redactions_for_document
 router = APIRouter(prefix="/documents", tags=["redactions"])
 
 
-async def apply_redactions_pipeline(
+def apply_redactions_pipeline(
     document_id: str,
     request: ApplyRedactionsRequest,
 ) -> None:
@@ -26,8 +25,7 @@ async def apply_redactions_pipeline(
     start = time.time()
 
     try:
-        await asyncio.to_thread(
-            apply_redactions_for_document,
+        apply_redactions_for_document(
             document_id=document_id,
             request=request,
         )
@@ -73,13 +71,15 @@ async def apply_redactions_pipeline(
 
 
 @router.post("/{document_id}/apply-redactions")
-async def apply_redactions(document_id: str, request: ApplyRedactionsRequest):
+async def apply_redactions(
+    document_id: str,
+    request: ApplyRedactionsRequest,
+    background_tasks: BackgroundTasks,
+):
     document = get_document_or_404(document_id)
 
     if document_id != request.documentId:
-        # Validation failure - logged as a warning (not info) since it
-        # indicates a client/frontend bug or a stale request, worth
-        # distinguishing from normal traffic when browsing OpenSearch.
+
         logger.warning(
             "redaction_request_rejected",
             extra={
@@ -102,10 +102,6 @@ async def apply_redactions(document_id: str, request: ApplyRedactionsRequest):
         )
         raise HTTPException(status_code=400, detail="No redaction decisions supplied")
 
-    # Logged at request-accepted time, separately from redaction_completed/
-    # redaction_failed which are logged later by the background task once
-    # the pipeline actually finishes - so a stuck/slow pipeline is visible
-    # as a started event with no matching completed/failed event yet.
     logger.info(
         "redaction_started",
         extra={
@@ -123,11 +119,10 @@ async def apply_redactions(document_id: str, request: ApplyRedactionsRequest):
         clear_error=True,
     )
 
-    asyncio.create_task(
-        apply_redactions_pipeline(
-            document_id=document_id,
-            request=request,
-        )
+    background_tasks.add_task(
+        apply_redactions_pipeline,
+        document_id=document_id,
+        request=request,
     )
 
     return {
