@@ -30,6 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ needs.set-environment.outputs.target_env }}
 
+    outputs:
+      image_uri: ${{ steps.build.outputs.image_uri }}
+
     permissions:
       id-token: write
       contents: read
@@ -60,6 +63,7 @@ jobs:
           identity: ministryofjustice-justice-redact-backend
 
       - name: Build & Push to ECR
+        id: build
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
@@ -71,6 +75,7 @@ jobs:
             -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
 
           docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
+          echo "image_uri=$REGISTRY/$REPOSITORY:python-$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Generate Kubernetes manifests
         run: |
@@ -121,3 +126,24 @@ jobs:
       - name: Deploy to Kubernetes
         run: |
           kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
+
+  # JOB 3: Snyk container + code scan against the image just pushed
+  sast:
+    name: Run SaST tooling
+    needs: [set-environment, ecr_and_deploy]
+    # Pinned to latest main as of 30 Jul 2026 — refresh periodically with:
+    # git ls-remote https://github.com/ministryofjustice/laa-reusable-github-actions main
+    uses: ministryofjustice/laa-reusable-github-actions/.github/workflows/sast.yml@932ee576d65d9992ca82955a5823e3d55e888417
+    permissions:
+      actions: read
+      id-token: write
+      contents: read
+      security-events: write
+    with:
+      image_uri: ${{ needs.ecr_and_deploy.outputs.image_uri }}
+      dockerfile_path: Dockerfile
+      minimum_threshold: high
+    secrets:
+      SNYK_CLIENT_ID: ${{ secrets.SNYK_CLIENT_ID }}
+      SNYK_CLIENT_SECRET: ${{ secrets.SNYK_CLIENT_SECRET }}
+      ECR_ROLE_TO_ASSUME: ${{ secrets.ECR_ROLE_TO_ASSUME }}
