@@ -7,6 +7,10 @@ from app.logging_config import logger
 from app.models.redaction_models import ApplyRedactionsRequest
 from app.services.document_store import get_document_or_404, update_document_record
 from app.services.redaction_service import apply_redactions_for_document
+from app.services.redaction_decision_store import (
+    get_redaction_decisions,
+    upsert_redaction_decisions,
+)
 
 router = APIRouter(prefix="/documents", tags=["redactions"])
 
@@ -68,6 +72,45 @@ def apply_redactions_pipeline(
             redaction_completed_at=datetime.now(timezone.utc),
             error_message=str(exc),
         )
+
+
+@router.get("/{document_id}/redaction-decisions")
+async def get_document_redaction_decisions(document_id: str):
+    get_document_or_404(document_id)
+
+    decision_set = get_redaction_decisions(document_id)
+
+    if decision_set is None:
+        return {
+            "documentId": document_id,
+            "decisions": [],
+        }
+
+    return decision_set
+
+
+@router.put("/{document_id}/redaction-decisions")
+async def save_document_redaction_decisions(
+    document_id: str,
+    request: ApplyRedactionsRequest,
+):
+    get_document_or_404(document_id)
+
+    if document_id != request.documentId:
+        raise HTTPException(
+            status_code=400,
+            detail="Document ID mismatch",
+        )
+
+    upsert_redaction_decisions(
+        document_id=document_id,
+        decisions_json=request.model_dump(),
+    )
+
+    return {
+        "documentId": document_id,
+        "status": "saved",
+    }
 
 
 @router.post("/{document_id}/apply-redactions")
