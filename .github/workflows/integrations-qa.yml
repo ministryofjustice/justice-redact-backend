@@ -45,7 +45,7 @@ jobs:
 
       - name: Verify PR status
         id: eligible
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const raw = `${{ steps.get-draft-prs.outputs.result }}`.trim() || '[]';
@@ -67,18 +67,18 @@ jobs:
 
     steps:
       # 1. Checkout GitHub repository
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # 2. Configure AWS credentials using OIDC for Dev
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@0d04879d366c9959065c153479c620d35e5c4097 # v3
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
           aws-region: eu-west-2
 
       # 3. Log into container registry
       - name: Log into ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
         id: login-ecr
       
       # 4. Obtain short-lived GitHub token for justice-redact private dependencies
