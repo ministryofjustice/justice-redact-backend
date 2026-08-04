@@ -41,17 +41,17 @@ jobs:
       KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Configure AWS credentials
         if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'prod')
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@0d04879d366c9959065c153479c620d35e5c4097 # v3
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
           aws-region: eu-west-2
 
       - name: Log into ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
         id: login-ecr
       
       # 4. Obtain short-lived GitHub token for justice-redact dependency
