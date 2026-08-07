@@ -13,6 +13,7 @@ class Document(Base):
     document_id = Column(String, primary_key=True)
     filename = Column(String, nullable=False)
     status = Column(String, nullable=False)
+    document_type = Column(String, nullable=False, default="unidentified")
 
     subject_name = Column(Text, nullable=False, default="")
     subject_prison_number = Column(Text, nullable=False, default="")

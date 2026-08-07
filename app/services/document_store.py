@@ -10,6 +10,7 @@ def document_to_dict(document: Document) -> dict:
         "documentId": document.document_id,
         "filename": document.filename,
         "status": document.status,
+        "documentType": document.document_type,
         "subjectName": document.subject_name,
         "subjectPrisonNumber": document.subject_prison_number,
         "otherPhrases": document.other_phrases,
@@ -39,12 +40,17 @@ def document_to_dict(document: Document) -> dict:
     }
 
 
-def create_document_record(document_id: str, filename: str) -> dict:
+def create_document_record(
+    document_id: str,
+    filename: str,
+    document_type: str,
+) -> dict:
     with SessionLocal() as session:
         document = Document(
             document_id=document_id,
             filename=filename,
             status="uploaded",
+            document_type=document_type,
             subject_name="",
             subject_prison_number="",
             other_phrases="",
