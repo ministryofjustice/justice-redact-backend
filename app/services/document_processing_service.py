@@ -81,7 +81,10 @@ def build_page_chunks(total_pages: int, chunk_size: int) -> list[dict]:
     return chunks
 
 
-def process_document_pipeline(document_id: str) -> None:
+def process_document_pipeline(
+    document_id: str,
+    document_type: str,
+) -> None:
     """
     Background task (kicked off via asyncio.create_task from
     app/api/routers/documents.py's /process endpoint) that downloads the
@@ -155,7 +158,13 @@ def process_document_pipeline(document_id: str) -> None:
 
         start = time.perf_counter()
 
+        document_type = document["documentType"]
+
+        if document_type == "unidentified":
+            document_type = "nomis"
+
         detection_runtime = build_detection_runtime(
+            doc_type=document_type,
             subject_name=document["subjectName"],
             subject_prison_number=document["subjectPrisonNumber"],
             extra_allow_list=other_phrases_list,

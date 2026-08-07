@@ -8,7 +8,9 @@ from app.services.document_store import (
     update_document_record,
 )
 from app.services.file_store import save_upload_file
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from typing import Literal
+
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from app.services.s3_service import get_object_from_s3
 from app.services.s3_keys import preview_image_key
@@ -17,7 +19,13 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 
 @router.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    document_type: Literal["nomis", "dps", "unidentified"] = Form(
+        ...,
+        alias="documentType",
+    ),
+):
     uploaded_filename = file.filename or "document.pdf"
 
     if file.content_type != "application/pdf":
@@ -42,6 +50,7 @@ async def upload_document(file: UploadFile = File(...)):
     create_document_record(
         document_id=document_id,
         filename=uploaded_filename,
+        document_type=document_type,
     )
 
     logger.info(
@@ -50,6 +59,7 @@ async def upload_document(file: UploadFile = File(...)):
             "event": "document_uploaded",
             "document_id": document_id,
             "uploaded_filename": uploaded_filename,
+            "document_type": document_type,
         },
     )
 
@@ -65,7 +75,7 @@ async def process_document(
     request: ProcessDocumentRequest,
     background_tasks: BackgroundTasks,
 ):
-    get_document_or_404(document_id)
+    document = get_document_or_404(document_id)
 
     update_document_record(
         document_id,
@@ -83,7 +93,11 @@ async def process_document(
         },
     )
 
-    background_tasks.add_task(process_document_pipeline, document_id)
+    background_tasks.add_task(
+        process_document_pipeline,
+        document_id,
+        document["documentType"],
+    )
 
     return {
         "documentId": document_id,
