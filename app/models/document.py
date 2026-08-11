@@ -1,10 +1,7 @@
 from sqlalchemy import Column, DateTime, String, Text
-from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
-
-class Base(DeclarativeBase):
-    pass
+from app.models.base import Base
 
 
 class Document(Base):

@@ -107,7 +107,7 @@ jobs:
       - name: Generate Kubernetes manifests
         run: |
           sudo apt-get update && sudo apt-get install -y gettext
-          mkdir -p k8s
+          mkdir -p k8s/app
 
           export TEAM_NAME=justice-redact
           export ENVIRONMENT="dev"
@@ -115,13 +115,15 @@ jobs:
           export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
           export SERVICE_ACCOUNT="justice-redact-dev"
           export INGRESS_CLASS="default-non-prod"
+          export MIGRATION_ID="qa-${GITHUB_SHA:0:12}-${GITHUB_RUN_ATTEMPT}"
 
-          envsubst < deployments/templates/deployment.yml > k8s/deployment.yml
-          envsubst < deployments/templates/service.yml > k8s/service.yml
-          envsubst < deployments/templates/ingress.yml > k8s/ingress.yml
+          envsubst < deployments/templates/deployment.yml > k8s/app/deployment.yml
+          envsubst < deployments/templates/service.yml > k8s/app/service.yml
+          envsubst < deployments/templates/ingress.yml > k8s/app/ingress.yml
+          envsubst < deployments/templates/migration-job.yml > k8s/migration-job.yml
           
           # Explicitly replace ONLY $NAMESPACE so Fluent Bit's runtime variables (${OPENSEARCH_PROXY_HOST}) are preserved
-          envsubst '$NAMESPACE' < deployments/templates/fluent-bit-configmap.yml > k8s/fluent-bit-configmap.yml
+          envsubst '$NAMESPACE' < deployments/templates/fluent-bit-configmap.yml > k8s/app/fluent-bit-configmap.yml
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: justice-redact/justice-redact-dev
@@ -141,7 +143,17 @@ jobs:
           kubectl config set-context ${KUBE_CLUSTER} --cluster=${KUBE_CLUSTER} --user=deploy-user --namespace=${KUBE_NAMESPACE}
           kubectl config use-context ${KUBE_CLUSTER}
 
-      # 8. Deploy to Kubernetes
+      # 8. Apply migrations once and wait before rolling the application forward
+      - name: Run database migrations
+        run: |
+          kubectl apply --filename=k8s/migration-job.yml --namespace=${KUBE_NAMESPACE}
+          kubectl wait \
+            --for=condition=complete \
+            --timeout=10m \
+            --filename=k8s/migration-job.yml \
+            --namespace=${KUBE_NAMESPACE}
+
+      # 9. Deploy to Kubernetes
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
+          kubectl apply --filename=k8s/app/ --namespace=${KUBE_NAMESPACE}

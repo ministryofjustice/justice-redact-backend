@@ -1,7 +1,7 @@
 from sqlalchemy import Column, ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSONB
 
-from app.models.document import Base
+from app.models.base import Base
 
 
 class RedactionDecision(Base):

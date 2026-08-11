@@ -7,6 +7,10 @@ on:
       - staging
       - prod
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   set-environment:
     runs-on: ubuntu-latest
@@ -80,13 +84,14 @@ jobs:
       - name: Generate Kubernetes manifests
         run: |
           sudo apt-get update && sudo apt-get install -y gettext
-          mkdir -p k8s
+          mkdir -p k8s/app
 
           export TEAM_NAME=justice-redact
           export ENVIRONMENT="${{ needs.set-environment.outputs.target_env }}"
           export NAMESPACE="${KUBE_NAMESPACE}"
           export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
           export SERVICE_ACCOUNT="justice-redact-${ENVIRONMENT}"
+          export MIGRATION_ID="${GITHUB_SHA:0:12}-${GITHUB_RUN_ATTEMPT}"
 
           if [ "${ENVIRONMENT}" = "prod" ]; then
             export INGRESS_CLASS="default"
@@ -94,9 +99,10 @@ jobs:
             export INGRESS_CLASS="default-non-prod"
           fi
 
-          envsubst < deployments/templates/deployment.yml > k8s/deployment.yml
-          envsubst < deployments/templates/service.yml > k8s/service.yml
-          envsubst < deployments/templates/ingress.yml > k8s/ingress.yml
+          envsubst < deployments/templates/deployment.yml > k8s/app/deployment.yml
+          envsubst < deployments/templates/service.yml > k8s/app/service.yml
+          envsubst < deployments/templates/ingress.yml > k8s/app/ingress.yml
+          envsubst < deployments/templates/migration-job.yml > k8s/migration-job.yml
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
@@ -117,15 +123,24 @@ jobs:
 
       - name: Validate Kubernetes Manifests
         run: |
-          kubectl apply --filename=k8s/ --dry-run=client
+          kubectl apply --filename=k8s/ --recursive --dry-run=client
 
       - name: Verify cluster access
         run: |
           kubectl get pods -n ${KUBE_NAMESPACE}
 
+      - name: Run database migrations
+        run: |
+          kubectl apply --filename=k8s/migration-job.yml --namespace=${KUBE_NAMESPACE}
+          kubectl wait \
+            --for=condition=complete \
+            --timeout=10m \
+            --filename=k8s/migration-job.yml \
+            --namespace=${KUBE_NAMESPACE}
+
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
+          kubectl apply --filename=k8s/app/ --namespace=${KUBE_NAMESPACE}
 
   # JOB 3: Snyk container + code scan against the image just pushed
   sast:
