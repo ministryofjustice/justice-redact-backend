@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Backend API for Justice Redact"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "alembic>=1.16,<2",
     "fastapi",
     "uvicorn[standard]",
     "python-multipart",

@@ -14,6 +14,30 @@ This service provides the API and processing layer for the **Justice Redact** pr
 - **PDF Engine**: [PyMuPDF](https://pymupdf.readthedocs.io)
 - **Storage**: Local file system (Prototype stage)
 
+## Database migrations
+
+Alembic owns PostgreSQL schema changes. With the database environment variables
+configured, apply all migrations with:
+
+```shell
+uv run alembic upgrade head
+```
+
+Create a migration after changing the SQLAlchemy models with:
+
+```shell
+uv run alembic revision --autogenerate -m "describe the schema change"
+```
+
+Always review generated migrations before committing them. The initial revision
+creates the three application tables on an empty database and adopts an existing
+environment when all three baseline tables are already present. It refuses a
+partial baseline rather than guessing how to repair it.
+
+Deployments run migrations in a single Kubernetes Job and wait for it to finish
+before updating the backend Deployment. Application replicas do not run
+migrations during startup.
+
 ## 📂 Project Structure
 ```text
 ├── routes/
