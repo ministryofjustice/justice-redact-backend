@@ -39,7 +39,7 @@ jobs:
 
     permissions:
       id-token: write
-      contents: read
+      contents: write # Allows pushing git tags back to GitHub repository
 
     env:
       KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
@@ -142,12 +142,44 @@ jobs:
         run: |
           kubectl apply --filename=k8s/app/ --namespace=${KUBE_NAMESPACE}
 
+      # Create deployment tag (Staging & Prod only)
+      - name: Create deployment tag
+        if: success() && needs.set-environment.outputs.target_env != 'dev'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Read version from package.json if present, or default to 0.0.0
+          VERSION=$(node -p "try { require('./package.json').version } catch(e) { '0.0.0' }")
+          TARGET_ENV="${{ needs.set-environment.outputs.target_env }}"
+          RUN_NUM="${{ github.run_number }}"
+
+          case "$TARGET_ENV" in
+            staging)
+              TAG="staging-v${VERSION}-${RUN_NUM}"
+              ;;
+            prod)
+              TAG="v${VERSION}"
+              ;;
+            *)
+              TAG="${TARGET_ENV}-v${VERSION}-${RUN_NUM}"
+              ;;
+          esac
+
+          echo "Creating tag: $TAG"
+
+          if [ "$TARGET_ENV" = "prod" ]; then
+            git tag -f -a "$TAG" -m "Deployed v$VERSION to $TARGET_ENV [skip ci]"
+            git push origin "$TAG" --force
+          else
+            git tag -a "$TAG" -m "Deployed v$VERSION to $TARGET_ENV [skip ci]"
+            git push origin "$TAG"
+          fi
+
   # JOB 3: Snyk container + code scan against the image just pushed
   sast:
     name: Run SaST tooling
     needs: [set-environment, ecr_and_deploy]
-    # Pinned to latest main as of 30 Jul 2026 — refresh periodically with:
-    # git ls-remote https://github.com/ministryofjustice/laa-reusable-github-actions main
     uses: ministryofjustice/laa-reusable-github-actions/.github/workflows/sast.yml@932ee576d65d9992ca82955a5823e3d55e888417
     permissions:
       actions: read

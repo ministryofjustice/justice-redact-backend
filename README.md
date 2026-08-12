@@ -47,3 +47,7 @@ migrations during startup.
     ├── processed/        # AI analysis (JSON output)
     ├── decisions/        # User-approved redaction metadata
     └── exports/          # Final redacted PDF documents
+
+## 📖 Deployment Documentation
+
+* [Deployment & Automated Release Guide](.github/workflows/DEPLOYMENT.md) – Overview of our deployment pipelines, environment tagging rules, and release creation process.
