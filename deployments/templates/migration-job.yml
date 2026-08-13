@@ -47,25 +47,36 @@ spec:
                 secretKeyRef:
                   name: rds-postgresql-instance-output
                   key: rds_instance_address
+
             - name: DB_NAME
               valueFrom:
                 secretKeyRef:
                   name: rds-postgresql-instance-output
                   key: database_name
+
             - name: DB_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: rds-postgresql-instance-output
                   key: database_username
+
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: rds-postgresql-instance-output
                   key: database_password
+
             - name: S3_BUCKET_NAME
               valueFrom:
                 secretKeyRef:
                   name: s3-bucket-output
                   key: bucket_name
+
             - name: S3_REGION
               value: "eu-west-2"
+
+            - name: SQS_QUEUE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justice-redact-sqs
+                  key: queue_url

@@ -420,6 +420,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "alembic" },
+    { name = "boto3" },
     { name = "fastapi" },
     { name = "justice-redact" },
     { name = "psycopg", extra = ["binary"] },
@@ -440,6 +441,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.16,<2" },
+    { name = "boto3", specifier = "==1.43.6" },
     { name = "fastapi" },
     { name = "justice-redact", git = "https://github.com/moj-analytical-services/justice-redact.git?rev=6cf2afdb3be5876985b5d24613c3878122dbfa51" },
     { name = "psycopg", extras = ["binary"] },

@@ -1,16 +1,18 @@
 from uuid import uuid4
 from app.logging_config import logger
 from app.models.document_requests import ProcessDocumentRequest
-from app.services.document_processing_service import process_document_pipeline
+from app.services.sqs_service import send_document_processing_message
 from app.services.document_store import (
     create_document_record,
     get_document_or_404,
     update_document_record,
+    mark_document_processing_queued,
+    try_start_document_processing_enqueue,
 )
 from app.services.file_store import save_upload_file
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from app.services.s3_service import get_object_from_s3
 from app.services.s3_keys import preview_image_key
@@ -73,35 +75,82 @@ async def upload_document(
 async def process_document(
     document_id: str,
     request: ProcessDocumentRequest,
-    background_tasks: BackgroundTasks,
 ):
     document = get_document_or_404(document_id)
 
-    update_document_record(
-        document_id,
-        status="processing",
+    if document["status"] in {
+        "enqueueing",
+        "queued",
+        "processing",
+        "retrying",
+        "ready_for_review",
+    }:
+        return {
+            "documentId": document_id,
+            "status": document["status"],
+        }
+
+    job_id = str(uuid4())
+
+    started = try_start_document_processing_enqueue(
+        document_id=document_id,
+        job_id=job_id,
         subject_name=request.subjectName,
         subject_prison_number=request.subjectPrisonNumber,
         other_phrases=request.otherPhrases,
     )
 
-    logger.info(
-        "document_processing_started",
-        extra={
-            "event": "document_processing_started",
-            "document_id": document_id,
-        },
+    if not started:
+        current_document = get_document_or_404(document_id)
+
+        return {
+            "documentId": document_id,
+            "status": current_document["status"],
+        }
+
+    try:
+        message_id = send_document_processing_message(
+            document_id=document_id,
+            job_id=job_id,
+        )
+    except Exception:
+        logger.exception(
+            "document_processing_enqueue_failed",
+            extra={
+                "event": "document_processing_enqueue_failed",
+                "document_id": document_id,
+                "job_id": job_id,
+            },
+        )
+
+        update_document_record(
+            document_id,
+            status="enqueue_failed",
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="The document could not be queued for processing",
+        )
+
+    mark_document_processing_queued(
+        document_id=document_id,
+        job_id=job_id,
     )
 
-    background_tasks.add_task(
-        process_document_pipeline,
-        document_id,
-        document["documentType"],
+    logger.info(
+        "document_processing_queued",
+        extra={
+            "event": "document_processing_queued",
+            "document_id": document_id,
+            "job_id": job_id,
+            "sqs_message_id": message_id,
+        },
     )
 
     return {
         "documentId": document_id,
-        "status": "processing",
+        "status": "queued",
     }
 
 
