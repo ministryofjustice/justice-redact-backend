@@ -118,6 +118,7 @@ jobs:
           export MIGRATION_ID="qa-${GITHUB_SHA:0:12}-${GITHUB_RUN_ATTEMPT}"
 
           envsubst < deployments/templates/deployment.yml > k8s/app/deployment.yml
+          envsubst < deployments/templates/worker-deployment.yml > k8s/app/worker-deployment.yml
           envsubst < deployments/templates/service.yml > k8s/app/service.yml
           envsubst < deployments/templates/ingress.yml > k8s/app/ingress.yml
           envsubst < deployments/templates/migration-job.yml > k8s/migration-job.yml

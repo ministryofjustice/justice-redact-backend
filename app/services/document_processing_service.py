@@ -1,8 +1,8 @@
 from pathlib import Path
 import pymupdf
-from datetime import datetime, timezone
+import shutil
 from app.logging_config import logger
-from app.services.document_store import get_document, update_document_record
+from app.services.document_store import get_document
 from app.services.review_result_store import upsert_review_result
 from app.services.s3_service import (
     download_file_from_s3,
@@ -113,13 +113,8 @@ def process_document_pipeline(
         )
         return
 
-    update_document_record(
-        document_id,
-        status="processing",
-        processing_started_at=datetime.now(timezone.utc),
-        processing_completed_at=None,
-        clear_error=True,
-    )
+    temp_pdf_path = Path("/tmp") / f"{document_id}.pdf"
+    image_preview_dir = Path("/tmp") / "processed" / document_id / "images"
 
     try:
         temp_pdf_path = Path("/tmp") / f"{document_id}.pdf"
@@ -335,12 +330,6 @@ def process_document_pipeline(
 
         _log_stage("upsert_review_result", document_id, time.perf_counter() - start)
 
-        update_document_record(
-            document_id,
-            status="ready_for_review",
-            processing_completed_at=datetime.now(timezone.utc),
-        )
-
         logger.info(
             "document_processing_completed",
             extra={
@@ -356,19 +345,24 @@ def process_document_pipeline(
 
     except Exception as exc:
 
-        logger.exception(
-            "document_processing_failed",
+        logger.error(
+            "document_processing_attempt_failed",
             extra={
-                "event": "document_processing_failed",
+                "event": "document_processing_attempt_failed",
                 "document_id": document_id,
-                "error": str(exc),
-                "duration_ms": round((time.perf_counter() - pipeline_start) * 1000, 2),
+                "error_type": type(exc).__name__,
+                "duration_ms": round(
+                    (time.perf_counter() - pipeline_start) * 1000,
+                    2,
+                ),
             },
         )
 
-        update_document_record(
-            document_id,
-            status="failed",
-            processing_completed_at=datetime.now(timezone.utc),
-            error_message=str(exc),
+        raise
+
+    finally:
+        temp_pdf_path.unlink(missing_ok=True)
+        shutil.rmtree(
+            image_preview_dir.parent,
+            ignore_errors=True,
         )
