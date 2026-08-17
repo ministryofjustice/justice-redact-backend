@@ -1,0 +1,40 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: justice-redact-backend
+  namespace: ${NAMESPACE}
+  spec:
+    scaleTargetRef:
+      apiVersion: apps/v1
+      kind: Deployment
+      name: justice-redact-backend
+    minReplicas: 2
+    maxReplicas: 10
+    metrics:
+      - type: ContainerResource
+        containerResource:
+          name: cpu
+          container: app
+          target:
+            type: Utilization
+            averageUtilization: 80
+      - type: ContainerResource
+        containerResource:
+          name: memory
+          container: app
+          target:
+            type: Utilization
+            averageUtilization: 80
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        policies:
+          - type: Pods
+            value: 2
+            periodSeconds: 60
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 60
