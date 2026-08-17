@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-fluent-bit-config
+  namespace: ${NAMESPACE}
+
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush         5
+        Log_Level     info
+        Parsers_File  parsers.conf
+        Storage.path  /var/log/flb-storage
+
+    [INPUT]
+        Name              tail
+        Path              /var/log/app/app.log
+        Parser            json
+        Tag               worker.*
+        Refresh_Interval  5
+        DB                /var/log/flb-storage/tail.db
+
+    [FILTER]
+        Name    modify
+        Match   worker.*
+        Add     kubernetes_namespace ${NAMESPACE}
+        Add     app justice-redact-worker
+        Add     pod_name ${POD_NAME}
+
+    [OUTPUT]
+        Name                 opensearch
+        Match                worker.*
+        Host                 ${OPENSEARCH_PROXY_HOST}
+        Port                 ${OPENSEARCH_PROXY_PORT}
+        Index                justice-redact-worker
+        Suppress_Type_Name   On
+        tls                  Off
+        Retry_Limit          5
+
+  parsers.conf: |
+    [PARSER]
+        Name    json
+        Format  json

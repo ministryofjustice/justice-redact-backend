@@ -261,7 +261,7 @@ def process_sqs_message(message: dict) -> None:
             },
         )
 
-    except Exception:
+    except Exception as exc:
         terminal = receive_count >= MAX_RECEIVE_COUNT
 
         fail_document_processing_attempt(
@@ -269,6 +269,18 @@ def process_sqs_message(message: dict) -> None:
             job_id=parsed.job_id,
             claim_id=claim_id,
             terminal=terminal,
+        )
+
+        logger.error(
+            "document_processing_job_failed",
+            extra={
+                "event": "document_processing_job_failed",
+                "document_id": parsed.document_id,
+                "job_id": parsed.job_id,
+                "attempt": receive_count,
+                "terminal": terminal,
+                "error_type": type(exc).__name__,
+            },
         )
 
         raise

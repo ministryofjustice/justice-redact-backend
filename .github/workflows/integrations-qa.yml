@@ -122,9 +122,9 @@ jobs:
           envsubst < deployments/templates/service.yml > k8s/app/service.yml
           envsubst < deployments/templates/ingress.yml > k8s/app/ingress.yml
           envsubst < deployments/templates/migration-job.yml > k8s/migration-job.yml
-          
-          # Explicitly replace ONLY $NAMESPACE so Fluent Bit's runtime variables (${OPENSEARCH_PROXY_HOST}) are preserved
+  
           envsubst '$NAMESPACE' < deployments/templates/fluent-bit-configmap.yml > k8s/app/fluent-bit-configmap.yml
+          envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: justice-redact/justice-redact-dev
