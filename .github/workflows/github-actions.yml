@@ -104,6 +104,8 @@ jobs:
           envsubst < deployments/templates/service.yml > k8s/app/service.yml
           envsubst < deployments/templates/ingress.yml > k8s/app/ingress.yml
           envsubst < deployments/templates/migration-job.yml > k8s/migration-job.yml
+          
+          envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}

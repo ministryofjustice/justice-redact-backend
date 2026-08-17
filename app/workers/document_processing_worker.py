@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import threading
+import signal
 
 from app.logging_config import configure_logging, logger
 from app.services.document_processing_service import process_document_pipeline
@@ -260,7 +261,7 @@ def process_sqs_message(message: dict) -> None:
             },
         )
 
-    except Exception:
+    except Exception as exc:
         terminal = receive_count >= MAX_RECEIVE_COUNT
 
         fail_document_processing_attempt(
@@ -268,6 +269,18 @@ def process_sqs_message(message: dict) -> None:
             job_id=parsed.job_id,
             claim_id=claim_id,
             terminal=terminal,
+        )
+
+        logger.error(
+            "document_processing_job_failed",
+            extra={
+                "event": "document_processing_job_failed",
+                "document_id": parsed.document_id,
+                "job_id": parsed.job_id,
+                "attempt": receive_count,
+                "terminal": terminal,
+                "error_type": type(exc).__name__,
+            },
         )
 
         raise
@@ -311,6 +324,25 @@ def parse_document_processing_message(body: str) -> DocumentProcessingMessage:
 def run_worker() -> None:
     configure_logging()
 
+    shutdown_requested = threading.Event()
+
+    def handle_shutdown(signum, _frame) -> None:
+        if shutdown_requested.is_set():
+            return
+
+        shutdown_requested.set()
+
+        logger.info(
+            "document_processing_worker_shutdown_requested",
+            extra={
+                "event": "document_processing_worker_shutdown_requested",
+                "signal": signal.Signals(signum).name,
+            },
+        )
+
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
+
     logger.info(
         "document_processing_worker_started",
         extra={
@@ -318,30 +350,67 @@ def run_worker() -> None:
         },
     )
 
-    while True:
+    while not shutdown_requested.is_set():
         try:
             messages = receive_document_processing_messages()
+        except Exception as exc:
+            logger.error(
+                "document_processing_worker_poll_failed",
+                extra={
+                    "event": "document_processing_worker_poll_failed",
+                    "error_type": type(exc).__name__,
+                },
+            )
+            continue
 
+        # SIGTERM may have arrived while SQS long polling was in progress.
+        # Do not begin processing a newly received document after shutdown.
+        if shutdown_requested.is_set():
             for message in messages:
+                receipt_handle = message.get("ReceiptHandle")
+
+                if not receipt_handle:
+                    continue
+
                 try:
-                    process_sqs_message(message)
+                    extend_document_processing_message_visibility(
+                        receipt_handle=receipt_handle,
+                        visibility_timeout_seconds=0,
+                    )
                 except Exception as exc:
                     logger.error(
-                        "document_processing_message_failed",
+                        "document_processing_worker_message_release_failed",
                         extra={
-                            "event": "document_processing_message_failed",
+                            "event": (
+                                "document_processing_worker_message_release_failed"
+                            ),
                             "error_type": type(exc).__name__,
                         },
                     )
 
-        except Exception as exc:
-            logger.error(
-                "document_processing_poll_failed",
-                extra={
-                    "event": "document_processing_poll_failed",
-                    "error_type": type(exc).__name__,
-                },
-            )
+            break
+
+        for message in messages:
+            try:
+                process_sqs_message(message)
+            except Exception as exc:
+                logger.error(
+                    "document_processing_worker_message_failed",
+                    extra={
+                        "event": "document_processing_worker_message_failed",
+                        "error_type": type(exc).__name__,
+                    },
+                )
+
+            if shutdown_requested.is_set():
+                break
+
+    logger.info(
+        "document_processing_worker_stopped",
+        extra={
+            "event": "document_processing_worker_stopped",
+        },
+    )
 
 
 if __name__ == "__main__":
