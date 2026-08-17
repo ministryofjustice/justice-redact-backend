@@ -17,6 +17,8 @@ spec:
         app: justice-redact-worker
 
     spec:
+      terminationGracePeriodSeconds: 1800
+      
       securityContext:
         seccompProfile:
           type: RuntimeDefault
