@@ -122,6 +122,9 @@ jobs:
           envsubst < deployments/templates/service.yml > k8s/app/service.yml
           envsubst < deployments/templates/ingress.yml > k8s/app/ingress.yml
           envsubst < deployments/templates/migration-job.yml > k8s/migration-job.yml
+          envsubst < deployments/templates/hpa.yml > k8s/app/hpa.yml
+          envsubst < deployments/templates/worker-hpa.yml > k8s/app/worker-hpa.yml
+
   
           envsubst '$NAMESPACE' < deployments/templates/fluent-bit-configmap.yml > k8s/app/fluent-bit-configmap.yml
           envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
