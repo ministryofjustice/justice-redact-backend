@@ -5,8 +5,6 @@ metadata:
   namespace: ${NAMESPACE}
 
 spec:
-  replicas: 2
-
   selector:
     matchLabels:
       app: justice-redact-backend
