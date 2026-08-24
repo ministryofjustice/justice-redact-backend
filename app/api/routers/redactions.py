@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from app.logging_config import logger
+from app.services.sqs_service import send_redaction_processing_message
 from app.models.redaction_models import (
     ApplyRedactionsRequest,
     SaveRedactionDecisionsRequest,
@@ -13,7 +14,6 @@ from app.services.redaction_run_store import (
     mark_redaction_run_queued,
 )
 from app.services.document_store import get_document_or_404
-from app.services.redaction_service import apply_redactions_for_document
 from app.services.redaction_decision_store import (
     get_redaction_decision_state,
     save_redaction_decisions,

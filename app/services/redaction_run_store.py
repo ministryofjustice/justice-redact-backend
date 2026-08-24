@@ -133,6 +133,10 @@ def create_redaction_run(
 
         session.add(redaction_run)
 
+        # Ensure the redaction run exists before documents.current_redaction_run_id
+        # references it through the foreign key.
+        session.flush()
+
         document.current_redaction_run_id = run_id
         document.status = "applying_redactions"
         document.redaction_started_at = now
