@@ -11,6 +11,7 @@ def document_to_dict(document: Document) -> dict:
         "documentId": document.document_id,
         "filename": document.filename,
         "status": document.status,
+        "currentRedactionRunId": document.current_redaction_run_id,
         "documentType": document.document_type,
         "warningReason": document.warning_reason,
         "warningAcknowledgedAt": (
