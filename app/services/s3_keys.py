@@ -1,3 +1,35 @@
+def document_prefix(document_id: str) -> str:
+    return f"documents/{document_id}/"
+
+
+def redaction_run_prefix(
+    document_id: str,
+    run_id: str,
+) -> str:
+    return f"documents/{document_id}/redaction-runs/{run_id}/"
+
+
+def redaction_run_redacted_pdf_key(
+    document_id: str,
+    run_id: str,
+) -> str:
+    return f"{redaction_run_prefix(document_id, run_id)}" "exports/redacted.pdf"
+
+
+def redaction_run_vetted_pdf_key(
+    document_id: str,
+    run_id: str,
+) -> str:
+    return f"{redaction_run_prefix(document_id, run_id)}" "exports/vetted.pdf"
+
+
+def redaction_run_exempt_pdf_key(
+    document_id: str,
+    run_id: str,
+) -> str:
+    return f"{redaction_run_prefix(document_id, run_id)}" "exports/_exempt.pdf"
+
+
 def original_pdf_key(document_id: str, filename: str) -> str:
     return f"documents/{document_id}/original/{filename}"
 

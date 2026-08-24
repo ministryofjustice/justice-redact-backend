@@ -1,98 +1,38 @@
-import time
+import uuid
 
-from datetime import datetime, timezone
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from app.logging_config import logger
-from app.models.redaction_models import ApplyRedactionsRequest
-from app.services.document_store import get_document_or_404, update_document_record
+from app.models.redaction_models import (
+    ApplyRedactionsRequest,
+    SaveRedactionDecisionsRequest,
+)
+from app.services.redaction_run_store import (
+    create_redaction_run,
+    fail_redaction_run_enqueue,
+    mark_redaction_run_queued,
+)
+from app.services.document_store import get_document_or_404
 from app.services.redaction_service import apply_redactions_for_document
 from app.services.redaction_decision_store import (
-    get_redaction_decisions,
-    upsert_redaction_decisions,
+    get_redaction_decision_state,
+    save_redaction_decisions,
 )
 
 router = APIRouter(prefix="/documents", tags=["redactions"])
-
-
-def apply_redactions_pipeline(
-    document_id: str,
-    request: ApplyRedactionsRequest,
-) -> None:
-    """
-    Background task (kicked off via asyncio.create_task in the route below)
-    that actually applies the redactions and updates the document's status.
-    Runs after the HTTP response has already been returned to the client,
-    so any success/failure here can only be observed via the document's
-    status field or - now - via these log events.
-    """
-    start = time.time()
-
-    try:
-        apply_redactions_for_document(
-            document_id=document_id,
-            request=request,
-        )
-
-        update_document_record(
-            document_id,
-            status="redaction_complete",
-            redaction_completed_at=datetime.now(timezone.utc),
-        )
-
-        logger.info(
-            "redaction_completed",
-            extra={
-                "event": "redaction_completed",
-                "document_id": document_id,
-                "redaction_count": len(request.decisions),
-                "duration_ms": round((time.time() - start) * 1000, 2),
-            },
-        )
-
-    except Exception as exc:
-        # logger.exception attaches the full traceback as structured data
-        # (exc_info=True is set automatically), so it's searchable in
-        # OpenSearch alongside the rest of the event - previously this was
-        # traceback.print_exc(), which wrote plain text to stderr and was
-        # invisible to the JSON-based logging/Fluent Bit pipeline entirely.
-        logger.exception(
-            "redaction_failed",
-            extra={
-                "event": "redaction_failed",
-                "document_id": document_id,
-                "error": str(exc),
-                "duration_ms": round((time.time() - start) * 1000, 2),
-            },
-        )
-
-        update_document_record(
-            document_id,
-            status="redaction_failed",
-            redaction_completed_at=datetime.now(timezone.utc),
-            error_message=str(exc),
-        )
 
 
 @router.get("/{document_id}/redaction-decisions")
 async def get_document_redaction_decisions(document_id: str):
     get_document_or_404(document_id)
 
-    decision_set = get_redaction_decisions(document_id)
-
-    if decision_set is None:
-        return {
-            "documentId": document_id,
-            "decisions": [],
-        }
-
-    return decision_set
+    return get_redaction_decision_state(document_id)
 
 
 @router.put("/{document_id}/redaction-decisions")
 async def save_document_redaction_decisions(
     document_id: str,
-    request: ApplyRedactionsRequest,
+    request: SaveRedactionDecisionsRequest,
 ):
     get_document_or_404(document_id)
 
@@ -102,14 +42,28 @@ async def save_document_redaction_decisions(
             detail="Document ID mismatch",
         )
 
-    upsert_redaction_decisions(
+    result = save_redaction_decisions(
         document_id=document_id,
-        decisions_json=request.model_dump(),
+        decisions_json={
+            "documentId": request.documentId,
+            "decisions": [decision.model_dump() for decision in request.decisions],
+        },
+        expected_revision=request.expectedRevision,
     )
+
+    if not result["saved"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Redaction decisions have changed",
+                "currentRevision": result["revision"],
+            },
+        )
 
     return {
         "documentId": document_id,
         "status": "saved",
+        "revision": result["revision"],
     }
 
 
@@ -117,7 +71,6 @@ async def save_document_redaction_decisions(
 async def apply_redactions(
     document_id: str,
     request: ApplyRedactionsRequest,
-    background_tasks: BackgroundTasks,
 ):
     document = get_document_or_404(document_id)
 
@@ -145,30 +98,91 @@ async def apply_redactions(
         )
         raise HTTPException(status_code=400, detail="No redaction decisions supplied")
 
+    run_id = str(uuid.uuid4())
+
+    result = create_redaction_run(
+        run_id=run_id,
+        document_id=document_id,
+        expected_review_revision=request.expectedRevision,
+    )
+
+    if not result["created"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Redaction decisions have changed",
+                "currentRevision": result["currentRevision"],
+            },
+        )
+
     logger.info(
-        "redaction_started",
+        "redaction_run_created",
         extra={
-            "event": "redaction_started",
+            "event": "redaction_run_created",
             "document_id": document_id,
-            "redaction_count": len(request.decisions),
+            "run_id": run_id,
         },
     )
 
-    update_document_record(
-        document_id,
-        status="applying_redactions",
-        redaction_started_at=datetime.now(timezone.utc),
-        redaction_completed_at=None,
-        clear_error=True,
+    try:
+        message_id = send_redaction_processing_message(
+            document_id=document_id,
+            run_id=run_id,
+        )
+    except Exception:
+        logger.exception(
+            "redaction_run_enqueue_failed",
+            extra={
+                "event": "redaction_run_enqueue_failed",
+                "document_id": document_id,
+                "run_id": run_id,
+            },
+        )
+
+        fail_redaction_run_enqueue(
+            run_id=run_id,
+            error_message="The redaction run could not be queued",
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="The redactions could not be queued for processing",
+        )
+
+    queued = mark_redaction_run_queued(
+        run_id=run_id,
     )
 
-    background_tasks.add_task(
-        apply_redactions_pipeline,
-        document_id=document_id,
-        request=request,
+    if not queued:
+        logger.warning(
+            "redaction_run_superseded_during_enqueue",
+            extra={
+                "event": "redaction_run_superseded_during_enqueue",
+                "document_id": document_id,
+                "run_id": run_id,
+            },
+        )
+
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This redaction run was superseded by a newer "
+                "Apply Redactions request"
+            ),
+        )
+
+    logger.info(
+        "redaction_run_queued",
+        extra={
+            "event": "redaction_run_queued",
+            "document_id": document_id,
+            "run_id": run_id,
+            "sqs_message_id": message_id,
+        },
     )
 
     return {
         "documentId": document_id,
-        "status": "applying_redactions",
+        "runId": run_id,
+        "status": "queued",
     }

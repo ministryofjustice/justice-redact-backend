@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models.base import Base
@@ -14,3 +14,14 @@ class RedactionDecision(Base):
     )
 
     decisions_json = Column(JSONB, nullable=False)
+
+    revision = Column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+    )

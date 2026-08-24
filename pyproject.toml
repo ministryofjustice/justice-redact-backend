@@ -29,3 +29,7 @@ package = false
 
 [tool.uv.sources]
 justice-redact = { git = "https://github.com/moj-analytical-services/justice-redact.git", rev = "6cf2afdb3be5876985b5d24613c3878122dbfa51" }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

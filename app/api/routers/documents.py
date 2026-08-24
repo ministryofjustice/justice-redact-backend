@@ -1,5 +1,6 @@
 from uuid import uuid4
 from app.logging_config import logger
+from datetime import datetime, timezone
 from app.models.document_requests import ProcessDocumentRequest
 from app.services.sqs_service import send_document_processing_message
 from app.services.document_store import (
@@ -16,6 +17,10 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from app.services.s3_service import get_object_from_s3
 from app.services.s3_keys import preview_image_key
+from app.services.s3_keys import document_prefix
+from app.services.s3_service import delete_s3_prefix
+from app.services.workflow_service import build_workflow_response
+from app.services.document_store import try_abandon_document_processing
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -26,6 +31,16 @@ async def upload_document(
     document_type: Literal["nomis", "dps", "unidentified"] = Form(
         ...,
         alias="documentType",
+    ),
+    warning_reason: (
+        Literal[
+            "scanned",
+            "unsupported-document-type",
+        ]
+        | None
+    ) = Form(
+        None,
+        alias="warningReason",
     ),
 ):
     uploaded_filename = file.filename or "document.pdf"
@@ -53,6 +68,7 @@ async def upload_document(
         document_id=document_id,
         filename=uploaded_filename,
         document_type=document_type,
+        warning_reason=warning_reason,
     )
 
     logger.info(
@@ -184,3 +200,56 @@ async def get_document_image_preview(document_id: str, image_id: str):
 @router.get("/{document_id}/status")
 async def get_document_status(document_id: str):
     return get_document_or_404(document_id)
+
+
+@router.get("/{document_id}/workflow")
+async def get_document_workflow(document_id: str):
+    document = get_document_or_404(document_id)
+
+    return build_workflow_response(document)
+
+
+@router.post("/{document_id}/warning/acknowledge")
+async def acknowledge_document_warning(document_id: str):
+    document = get_document_or_404(document_id)
+
+    acknowledged_at = datetime.now(timezone.utc)
+
+    update_document_record(
+        document_id,
+        warning_acknowledged_at=acknowledged_at,
+    )
+
+    document["warningAcknowledgedAt"] = acknowledged_at.isoformat()
+
+    return build_workflow_response(document)
+
+
+@router.post("/{document_id}/abandon")
+async def abandon_document(document_id: str):
+    document = get_document_or_404(document_id)
+
+    abandoned = try_abandon_document_processing(
+        document_id=document_id,
+    )
+
+    if not abandoned:
+        raise HTTPException(
+            status_code=409,
+            detail="Document can no longer be abandoned",
+        )
+
+    try:
+        delete_s3_prefix(document_prefix(document_id))
+    except Exception:
+        logger.exception(
+            "document_abandon_cleanup_failed",
+            extra={
+                "event": "document_abandon_cleanup_failed",
+                "document_id": document_id,
+            },
+        )
+
+    document["status"] = "abandoned"
+
+    return build_workflow_response(document)

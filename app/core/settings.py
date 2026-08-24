@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     s3_region: str
 
     sqs_queue_url: str
+    redaction_sqs_queue_url: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

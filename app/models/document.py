@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, String, Text, Integer
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text, Integer
 from sqlalchemy.sql import func
 
 from app.models.base import Base
@@ -11,6 +11,15 @@ class Document(Base):
     filename = Column(String, nullable=False)
     status = Column(String, nullable=False)
     document_type = Column(String, nullable=False, default="unidentified")
+    warning_reason = Column(String, nullable=True)
+    warning_acknowledged_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    abandoned_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     processing_job_id = Column(String, nullable=True)
     processing_attempt_count = Column(
         Integer,
@@ -23,6 +32,11 @@ class Document(Base):
     )
     processing_lease_expires_at = Column(
         DateTime(timezone=True),
+        nullable=True,
+    )
+    current_redaction_run_id = Column(
+        String,
+        ForeignKey("redaction_runs.run_id"),
         nullable=True,
     )
 
