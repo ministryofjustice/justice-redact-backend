@@ -6,11 +6,16 @@ import threading
 import signal
 
 from app.logging_config import configure_logging, logger
-from app.services.document_processing_service import process_document_pipeline
+from app.services.document_processing_service import (
+    DocumentProcessingCancelled,
+    process_document_pipeline,
+)
+from app.services.s3_keys import document_prefix
+from app.services.s3_service import delete_s3_prefix
 from app.services.document_store import (
-    complete_document_processing,
     fail_document_processing_attempt,
     get_document,
+    is_document_processing_owner,
     renew_document_processing_lease,
     try_claim_document_processing,
 )
@@ -227,25 +232,14 @@ def process_sqs_message(message: dict) -> None:
         process_document_pipeline(
             parsed.document_id,
             document["documentType"],
-        )
-
-        completed = complete_document_processing(
-            document_id=parsed.document_id,
             job_id=parsed.job_id,
             claim_id=claim_id,
-            completed_at=datetime.now(timezone.utc),
+            is_processing_active=lambda: is_document_processing_owner(
+                document_id=parsed.document_id,
+                job_id=parsed.job_id,
+                claim_id=claim_id,
+            ),
         )
-
-        if not completed:
-            logger.warning(
-                "document_processing_completion_rejected",
-                extra={
-                    "event": "document_processing_completion_rejected",
-                    "document_id": parsed.document_id,
-                    "job_id": parsed.job_id,
-                },
-            )
-            return
 
         delete_document_processing_message(
             receipt_handle=receipt_handle,
@@ -260,6 +254,35 @@ def process_sqs_message(message: dict) -> None:
                 "attempt": receive_count,
             },
         )
+
+    except DocumentProcessingCancelled:
+        try:
+            delete_s3_prefix(document_prefix(parsed.document_id))
+        except Exception as exc:
+            logger.error(
+                "document_processing_cancel_cleanup_failed",
+                extra={
+                    "event": "document_processing_cancel_cleanup_failed",
+                    "document_id": parsed.document_id,
+                    "job_id": parsed.job_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+
+        delete_document_processing_message(
+            receipt_handle=receipt_handle,
+        )
+
+        logger.info(
+            "document_processing_cancelled",
+            extra={
+                "event": "document_processing_cancelled",
+                "document_id": parsed.document_id,
+                "job_id": parsed.job_id,
+            },
+        )
+
+        return
 
     except Exception as exc:
         terminal = receive_count >= MAX_RECEIVE_COUNT

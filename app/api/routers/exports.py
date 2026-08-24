@@ -5,7 +5,11 @@ from app.logging_config import logger
 from app.services.document_store import get_document_or_404
 from app.services.redaction_decision_store import get_redaction_decisions
 from app.services.review_result_store import get_review_result
-from app.services.s3_keys import exempt_pdf_key, redacted_pdf_key, vetted_pdf_key
+from app.services.s3_keys import (
+    redaction_run_exempt_pdf_key,
+    redaction_run_redacted_pdf_key,
+    redaction_run_vetted_pdf_key,
+)
 from app.services.s3_service import get_object_from_s3, object_exists_in_s3
 
 router = APIRouter(prefix="/documents", tags=["exports"])
@@ -34,9 +38,28 @@ def _count_page_decisions(
 async def get_document_export(document_id: str):
     document = get_document_or_404(document_id)
 
-    redacted_key = redacted_pdf_key(document_id)
-    vetted_key = vetted_pdf_key(document_id)
-    exempt_key = exempt_pdf_key(document_id)
+    run_id = document.get("currentRedactionRunId")
+
+    if not run_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Redaction run not found",
+        )
+
+    redacted_key = redaction_run_redacted_pdf_key(
+        document_id,
+        run_id,
+    )
+
+    vetted_key = redaction_run_vetted_pdf_key(
+        document_id,
+        run_id,
+    )
+
+    exempt_key = redaction_run_exempt_pdf_key(
+        document_id,
+        run_id,
+    )
 
     if not object_exists_in_s3(redacted_key):
         # "reason" field lets these three distinct failure cases be told
@@ -124,7 +147,18 @@ async def get_document_export(document_id: str):
 async def download_redacted_file(document_id: str):
     document = get_document_or_404(document_id)
 
-    key = redacted_pdf_key(document_id)
+    run_id = document.get("currentRedactionRunId")
+
+    if not run_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Redaction run not found",
+        )
+
+    key = redaction_run_redacted_pdf_key(
+        document_id,
+        run_id,
+    )
 
     if not object_exists_in_s3(key):
         raise HTTPException(status_code=404, detail="Exported file not found")
@@ -158,7 +192,18 @@ async def download_redacted_file(document_id: str):
 async def download_vetted_file(document_id: str):
     document = get_document_or_404(document_id)
 
-    key = vetted_pdf_key(document_id)
+    run_id = document.get("currentRedactionRunId")
+
+    if not run_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Redaction run not found",
+        )
+
+    key = redaction_run_vetted_pdf_key(
+        document_id,
+        run_id,
+    )
 
     if not object_exists_in_s3(key):
         raise HTTPException(status_code=404, detail="Vetted file not found")
@@ -190,7 +235,18 @@ async def download_vetted_file(document_id: str):
 async def download_exempt_file(document_id: str):
     document = get_document_or_404(document_id)
 
-    key = exempt_pdf_key(document_id)
+    run_id = document.get("currentRedactionRunId")
+
+    if not run_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Redaction run not found",
+        )
+
+    key = redaction_run_exempt_pdf_key(
+        document_id,
+        run_id,
+    )
 
     if not object_exists_in_s3(key):
         raise HTTPException(status_code=404, detail="Exempt file not found")

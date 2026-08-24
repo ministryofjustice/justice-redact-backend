@@ -61,3 +61,24 @@ def download_json_from_s3(key: str) -> dict:
     )
 
     return json.loads(response["Body"].read())
+
+
+def delete_s3_prefix(prefix: str) -> None:
+    paginator = s3_client.get_paginator("list_objects_v2")
+
+    for page in paginator.paginate(
+        Bucket=_BUCKET,
+        Prefix=prefix,
+    ):
+        objects = [{"Key": item["Key"]} for item in page.get("Contents", [])]
+
+        if not objects:
+            continue
+
+        s3_client.delete_objects(
+            Bucket=_BUCKET,
+            Delete={
+                "Objects": objects,
+                "Quiet": True,
+            },
+        )

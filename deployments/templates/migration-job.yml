@@ -80,3 +80,10 @@ spec:
                 secretKeyRef:
                   name: justice-redact-sqs
                   key: queue_url
+                
+            - name: REDACTION_SQS_QUEUE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justice-redact-redaction-sqs
+                  key: queue_url
+                  optional: true

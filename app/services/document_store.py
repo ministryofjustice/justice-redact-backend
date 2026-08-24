@@ -11,7 +11,17 @@ def document_to_dict(document: Document) -> dict:
         "documentId": document.document_id,
         "filename": document.filename,
         "status": document.status,
+        "currentRedactionRunId": document.current_redaction_run_id,
         "documentType": document.document_type,
+        "warningReason": document.warning_reason,
+        "warningAcknowledgedAt": (
+            document.warning_acknowledged_at.isoformat()
+            if document.warning_acknowledged_at
+            else None
+        ),
+        "abandonedAt": (
+            document.abandoned_at.isoformat() if document.abandoned_at else None
+        ),
         "processingJobId": document.processing_job_id,
         "processingAttemptCount": document.processing_attempt_count,
         "processingClaimId": document.processing_claim_id,
@@ -53,6 +63,7 @@ def create_document_record(
     document_id: str,
     filename: str,
     document_type: str,
+    warning_reason: str | None = None,
 ) -> dict:
     with SessionLocal() as session:
         document = Document(
@@ -60,6 +71,7 @@ def create_document_record(
             filename=filename,
             status="uploaded",
             document_type=document_type,
+            warning_reason=warning_reason,
             subject_name="",
             subject_prison_number="",
             other_phrases="",
@@ -102,6 +114,9 @@ def update_document_record(
     subject_name: str | None = None,
     subject_prison_number: str | None = None,
     other_phrases: str | None = None,
+    warning_reason: str | None = None,
+    warning_acknowledged_at: datetime | None = None,
+    abandoned_at: datetime | None = None,
     processing_started_at: datetime | None = None,
     processing_completed_at: datetime | None = None,
     redaction_started_at: datetime | None = None,
@@ -138,6 +153,15 @@ def update_document_record(
 
         if other_phrases is not None:
             document.other_phrases = other_phrases
+
+        if warning_reason is not None:
+            document.warning_reason = warning_reason
+
+        if warning_acknowledged_at is not None:
+            document.warning_acknowledged_at = warning_acknowledged_at
+
+        if abandoned_at is not None:
+            document.abandoned_at = abandoned_at
 
         if processing_started_at is not None:
             document.processing_started_at = processing_started_at
@@ -204,6 +228,25 @@ def try_claim_document_processing(
         session.commit()
 
         return result.rowcount == 1
+
+
+def is_document_processing_owner(
+    *,
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+) -> bool:
+    with SessionLocal() as session:
+        document = session.get(Document, document_id)
+
+        if document is None:
+            return False
+
+        return (
+            document.status == "processing"
+            and document.processing_job_id == job_id
+            and document.processing_claim_id == claim_id
+        )
 
 
 def renew_document_processing_lease(
@@ -349,6 +392,42 @@ def try_start_document_processing_enqueue(
                 subject_prison_number=subject_prison_number,
                 other_phrases=other_phrases,
                 error_message=None,
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
+
+
+def try_abandon_document_processing(
+    *,
+    document_id: str,
+) -> bool:
+    now = datetime.now(timezone.utc)
+
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.status.in_(
+                    [
+                        "uploaded",
+                        "enqueue_failed",
+                        "enqueueing",
+                        "queued",
+                        "processing",
+                        "retrying",
+                        "failed",
+                    ]
+                ),
+            )
+            .values(
+                status="abandoned",
+                abandoned_at=now,
+                processing_claim_id=None,
+                processing_lease_expires_at=None,
             )
         )
 

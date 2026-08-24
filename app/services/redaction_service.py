@@ -11,14 +11,13 @@ from app.models.redaction_models import (
     TextRedactionDecision,
 )
 from app.services.document_store import get_document_or_404
-from app.services.redaction_decision_store import upsert_redaction_decisions
 from app.services.s3_keys import (
     document_geometry_chunk_key,
     document_geometry_manifest_key,
-    exempt_pdf_key,
     original_pdf_key,
-    redacted_pdf_key,
-    vetted_pdf_key,
+    redaction_run_exempt_pdf_key,
+    redaction_run_redacted_pdf_key,
+    redaction_run_vetted_pdf_key,
 )
 from app.services.s3_service import (
     download_file_from_s3,
@@ -36,6 +35,19 @@ from justice_redact.pdf_handler.decisions import (
     TextSpanDecision,
 )
 from justice_redact.pdf_handler.resolution.resolve_any import resolve_pdf_decisions_once
+
+
+class RedactionProcessingCancelled(Exception):
+    pass
+
+
+def assert_redaction_processing_active(
+    is_redaction_active,
+) -> None:
+    if not is_redaction_active():
+        raise RedactionProcessingCancelled(
+            "Redaction processing is no longer authoritative"
+        )
 
 
 def build_pdf_handler_decisions(document_id: str, decisions):
@@ -140,20 +152,14 @@ def group_decisions_by_chunk(
 
 
 def apply_redactions_for_document(
+    *,
     document_id: str,
+    run_id: str,
     request: ApplyRedactionsRequest,
+    is_redaction_active=lambda: True,
 ) -> dict:
     pipeline_start = time.perf_counter()
-
-    start = time.perf_counter()
-    upsert_redaction_decisions(
-        document_id=document_id,
-        decisions_json=request.model_dump(),
-    )
-    print(
-        f"[REDACTION_TIMING] upsert_redaction_decisions={time.perf_counter() - start:.2f}s",
-        flush=True,
-    )
+    assert_redaction_processing_active(is_redaction_active)
 
     start = time.perf_counter()
     original_filename = get_document_or_404(document_id)["filename"]
@@ -162,10 +168,10 @@ def apply_redactions_for_document(
         flush=True,
     )
 
-    pdf_path = Path("/tmp") / f"{document_id}.pdf"
-    redacted_output_path = Path("/tmp") / f"{document_id}-redacted.pdf"
-    vetted_output_path = Path("/tmp") / f"{document_id}-vetted.pdf"
-    exempt_output_path = Path("/tmp") / f"{document_id}-exempt.pdf"
+    pdf_path = Path("/tmp") / f"{document_id}-{run_id}.pdf"
+    redacted_output_path = Path("/tmp") / f"{document_id}-{run_id}-redacted.pdf"
+    vetted_output_path = Path("/tmp") / f"{document_id}-{run_id}-vetted.pdf"
+    exempt_output_path = Path("/tmp") / f"{document_id}-{run_id}-exempt.pdf"
 
     start = time.perf_counter()
     download_file_from_s3(
@@ -209,6 +215,7 @@ def apply_redactions_for_document(
     resolved_decisions = []
 
     for chunk_index, chunk_decisions in sorted(decisions_by_chunk.items()):
+        assert_redaction_processing_active(is_redaction_active)
         chunk_start = time.perf_counter()
 
         chunk_geometry = download_json_from_s3(
@@ -222,6 +229,7 @@ def apply_redactions_for_document(
             document=chunk_document,
             decisions=chunk_decisions,
         )
+        assert_redaction_processing_active(is_redaction_active)
 
         resolved_decisions.extend(chunk_resolved_decisions)
 
@@ -258,6 +266,33 @@ def apply_redactions_for_document(
     page_decisions = build_page_decisions(request.decisions)
     exempt_page_numbers = page_decisions["exempt_page_numbers"]
     deleted_page_numbers = page_decisions["deleted_page_numbers"]
+
+    original_page_count = manifest.get("totalPages") or 0
+
+    valid_exempt_page_numbers = [
+        page_number
+        for page_number in exempt_page_numbers
+        if 1 <= page_number <= original_page_count
+    ]
+
+    valid_deleted_page_numbers = [
+        page_number
+        for page_number in deleted_page_numbers
+        if 1 <= page_number <= original_page_count
+    ]
+
+    page_counts = {
+        "original": original_page_count,
+        "exempt": len(valid_exempt_page_numbers),
+        "deleted": len(valid_deleted_page_numbers),
+        "redacted": max(
+            original_page_count
+            - len(valid_exempt_page_numbers)
+            - len(valid_deleted_page_numbers),
+            0,
+        ),
+    }
+
     redacted_excluded_page_numbers = sorted(
         set(exempt_page_numbers + deleted_page_numbers)
     )
@@ -274,6 +309,7 @@ def apply_redactions_for_document(
         )
 
     start = time.perf_counter()
+    assert_redaction_processing_active(is_redaction_active)
     apply_pdf_decisions(
         document=None,
         pdf_path=pdf_path,
@@ -281,12 +317,14 @@ def apply_redactions_for_document(
         output_path=redacted_output_path,
         excluded_page_numbers=redacted_excluded_page_numbers,
     )
+    assert_redaction_processing_active(is_redaction_active)
     print(
         f"[REDACTION_TIMING] apply_pdf_decisions={time.perf_counter() - start:.2f}s",
         flush=True,
     )
 
     start = time.perf_counter()
+    assert_redaction_processing_active(is_redaction_active)
     apply_vetted_pdf_highlights(
         document=None,
         pdf_path=pdf_path,
@@ -294,6 +332,7 @@ def apply_redactions_for_document(
         output_path=vetted_output_path,
         excluded_page_numbers=vetted_excluded_page_numbers,
     )
+    assert_redaction_processing_active(is_redaction_active)
     print(
         f"[REDACTION_TIMING] apply_vetted_pdf_highlights={time.perf_counter() - start:.2f}s",
         flush=True,
@@ -301,20 +340,26 @@ def apply_redactions_for_document(
 
     if exempt_page_numbers:
         start = time.perf_counter()
+        assert_redaction_processing_active(is_redaction_active)
         create_exempt_pdf(
             pdf_path=pdf_path,
             output_path=exempt_output_path,
             exempt_page_numbers=exempt_page_numbers,
         )
+        assert_redaction_processing_active(is_redaction_active)
         print(
             f"[REDACTION_TIMING] create_exempt_pdf={time.perf_counter() - start:.2f}s",
             flush=True,
         )
 
     start = time.perf_counter()
+    assert_redaction_processing_active(is_redaction_active)
     upload_file_to_s3(
         redacted_output_path,
-        redacted_pdf_key(document_id),
+        redaction_run_redacted_pdf_key(
+            document_id,
+            run_id,
+        ),
     )
     print(
         f"[REDACTION_TIMING] upload_redacted_pdf={time.perf_counter() - start:.2f}s",
@@ -322,9 +367,13 @@ def apply_redactions_for_document(
     )
 
     start = time.perf_counter()
+    assert_redaction_processing_active(is_redaction_active)
     upload_file_to_s3(
         vetted_output_path,
-        vetted_pdf_key(document_id),
+        redaction_run_vetted_pdf_key(
+            document_id,
+            run_id,
+        ),
     )
     print(
         f"[REDACTION_TIMING] upload_vetted_pdf={time.perf_counter() - start:.2f}s",
@@ -333,9 +382,13 @@ def apply_redactions_for_document(
 
     if exempt_page_numbers:
         start = time.perf_counter()
+        assert_redaction_processing_active(is_redaction_active)
         upload_file_to_s3(
             exempt_output_path,
-            exempt_pdf_key(document_id),
+            redaction_run_exempt_pdf_key(
+                document_id,
+                run_id,
+            ),
         )
         print(
             f"[REDACTION_TIMING] upload_exempt_pdf={time.perf_counter() - start:.2f}s",
@@ -347,16 +400,29 @@ def apply_redactions_for_document(
         flush=True,
     )
 
+    assert_redaction_processing_active(is_redaction_active)
     return {
         "totalDecisionsApplied": len(typed_decisions),
         "exemptPages": exempt_page_numbers,
         "deletedPages": deleted_page_numbers,
         "redactedExcludedPages": redacted_excluded_page_numbers,
         "vettedExcludedPages": vetted_excluded_page_numbers,
+        "pageCounts": page_counts,
         "decisionTypes": sorted({decision.kind for decision in request.decisions}),
-        "exportPath": redacted_pdf_key(document_id),
-        "vettedExportPath": vetted_pdf_key(document_id),
+        "exportPath": redaction_run_redacted_pdf_key(
+            document_id,
+            run_id,
+        ),
+        "vettedExportPath": redaction_run_vetted_pdf_key(
+            document_id,
+            run_id,
+        ),
         "exemptExportPath": (
-            exempt_pdf_key(document_id) if exempt_page_numbers else None
+            redaction_run_exempt_pdf_key(
+                document_id,
+                run_id,
+            )
+            if exempt_page_numbers
+            else None
         ),
     }

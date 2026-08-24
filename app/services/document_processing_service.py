@@ -1,9 +1,12 @@
 from pathlib import Path
 import pymupdf
 import shutil
+from datetime import datetime, timezone
 from app.logging_config import logger
 from app.services.document_store import get_document
-from app.services.review_result_store import upsert_review_result
+from app.services.review_result_store import (
+    publish_review_result_if_processing_owner,
+)
 from app.services.s3_service import (
     download_file_from_s3,
     upload_file_to_s3,
@@ -21,6 +24,19 @@ import time
 
 
 PDF_PROCESSING_CHUNK_SIZE = 100
+
+
+class DocumentProcessingCancelled(Exception):
+    pass
+
+
+def assert_processing_active(
+    is_processing_active,
+) -> None:
+    if not is_processing_active():
+        raise DocumentProcessingCancelled(
+            "Document processing is no longer authoritative"
+        )
 
 
 def _log_stage(stage: str, document_id: str, duration_s: float, **extra) -> None:
@@ -84,6 +100,10 @@ def build_page_chunks(total_pages: int, chunk_size: int) -> list[dict]:
 def process_document_pipeline(
     document_id: str,
     document_type: str,
+    *,
+    job_id: str,
+    claim_id: str,
+    is_processing_active=lambda: True,
 ) -> None:
     """
     Background task (kicked off via asyncio.create_task from
@@ -117,6 +137,8 @@ def process_document_pipeline(
     image_preview_dir = Path("/tmp") / "processed" / document_id / "images"
 
     try:
+        assert_processing_active(is_processing_active)
+
         temp_pdf_path = Path("/tmp") / f"{document_id}.pdf"
 
         start = time.perf_counter()
@@ -177,6 +199,8 @@ def process_document_pipeline(
         preview_count = 0
 
         for chunk in chunks:
+            assert_processing_active(is_processing_active)
+
             chunk_index = chunk["chunkIndex"]
             page_start = chunk["pageStart"]
             page_end = chunk["pageEnd"]
@@ -193,6 +217,8 @@ def process_document_pipeline(
                 other_phrases=other_phrases_list,
                 runtime=detection_runtime,
             )
+
+            assert_processing_active(is_processing_active)
 
             _log_stage(
                 "detect_for_review_chunk",
@@ -323,10 +349,20 @@ def process_document_pipeline(
 
         start = time.perf_counter()
 
-        upsert_review_result(
+        assert_processing_active(is_processing_active)
+
+        published = publish_review_result_if_processing_owner(
             document_id=document_id,
+            job_id=job_id,
+            claim_id=claim_id,
             review_json=result,
+            completed_at=datetime.now(timezone.utc),
         )
+
+        if not published:
+            raise DocumentProcessingCancelled(
+                "Document processing lost ownership before final publication"
+            )
 
         _log_stage("upsert_review_result", document_id, time.perf_counter() - start)
 

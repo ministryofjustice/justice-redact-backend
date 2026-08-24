@@ -52,3 +52,10 @@ RedactionDecision = (
 class ApplyRedactionsRequest(BaseModel):
     documentId: str
     decisions: list[RedactionDecision]
+    expectedRevision: int
+
+
+class SaveRedactionDecisionsRequest(BaseModel):
+    documentId: str
+    decisions: list[RedactionDecision]
+    expectedRevision: int

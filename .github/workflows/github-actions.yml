@@ -106,6 +106,8 @@ jobs:
           envsubst < deployments/templates/migration-job.yml > k8s/migration-job.yml
           envsubst < deployments/templates/hpa.yml > k8s/app/hpa.yml
           envsubst < deployments/templates/worker-hpa.yml > k8s/app/worker-hpa.yml
+          envsubst < deployments/templates/redaction-worker-deployment.yml > k8s/app/redaction-worker-deployment.yml
+          envsubst < deployments/templates/redaction-worker-hpa.yml > k8s/app/redaction-worker-hpa.yml
           
           envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
         env:
