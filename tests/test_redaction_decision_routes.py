@@ -309,3 +309,71 @@ async def test_apply_redactions_returns_409_when_run_is_superseded_during_enqueu
         )
 
     assert exc_info.value.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_cancel_redactions_cancels_current_run(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        redactions,
+        "get_document_or_404",
+        lambda document_id: {
+            "documentId": document_id,
+        },
+    )
+
+    captured = {}
+
+    def fake_cancel_redaction_run(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        redactions,
+        "cancel_redaction_run",
+        fake_cancel_redaction_run,
+    )
+
+    response = await redactions.cancel_redactions(
+        document_id="document-123",
+        run_id="run-123",
+    )
+
+    assert response == {
+        "documentId": "document-123",
+        "runId": "run-123",
+        "status": "cancelled",
+    }
+
+    assert captured == {
+        "document_id": "document-123",
+        "run_id": "run-123",
+    }
+
+
+@pytest.mark.anyio
+async def test_cancel_redactions_returns_409_for_non_current_run(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        redactions,
+        "get_document_or_404",
+        lambda document_id: {
+            "documentId": document_id,
+        },
+    )
+
+    monkeypatch.setattr(
+        redactions,
+        "cancel_redaction_run",
+        lambda **kwargs: False,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await redactions.cancel_redactions(
+            document_id="document-123",
+            run_id="old-run",
+        )
+
+    assert exc_info.value.status_code == 409
