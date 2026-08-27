@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+  namespace: ${NAMESPACE}
+
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        # Flush data every 5 seconds
+        Flush         5
+
+        # Fluent Bit logging verbosity
+        Log_Level     info
+
+        # Parser configuration file
+        Parsers_File  parsers.conf
+
+        # Disk buffer location
+        Storage.path  /var/log/flb-storage
+
+    [INPUT]
+        # Tail the application JSON log
+        Name              tail
+        Path              /var/log/app/app.log
+        Parser            json
+        Tag               backend.*
+        Refresh_Interval  5
+        DB                /var/log/flb-storage/tail.db
+
+    [FILTER]
+        # Add searchable deployment metadata
+        Name    modify
+        Match   backend.*
+        Add     kubernetes_namespace ${NAMESPACE}
+        Add     app justice-redact-backend
+
+    [OUTPUT]
+        # Send backend logs to the in-cluster OpenSearch proxy
+        Name                 opensearch
+        Match                backend.*
+        Host                 ${OPENSEARCH_PROXY_HOST}
+        Port                 ${OPENSEARCH_PROXY_PORT}
+        Index                justice-redact-backend
+        Suppress_Type_Name   On
+        tls                  Off
+        Retry_Limit          5
+
+  parsers.conf: |
+    [PARSER]
+        Name    json
+        Format  json

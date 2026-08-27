@@ -3,22 +3,205 @@ kind: Deployment
 metadata:
   name: justice-redact-backend
   namespace: ${NAMESPACE}
+
 spec:
-  replicas: 2
   selector:
     matchLabels:
       app: justice-redact-backend
+
   template:
     metadata:
       labels:
         app: justice-redact-backend
+
     spec:
+      # Apply the restricted-compatible seccomp profile to all pod containers.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Use the environment-specific IRSA service account for AWS access.
       serviceAccountName: ${SERVICE_ACCOUNT}
+
       containers:
         - name: app
           image: ${IMAGE}
+          imagePullPolicy: Always
+
           ports:
             - containerPort: 8080
+
+          # Allow long processing operations before treating the application as unhealthy.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 20
+
+          # Remove unresponsive application pods from service traffic promptly.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          # Provide sufficient temporary capacity for CPU-intensive PDF processing.
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+
+          # Run the application as a restricted non-root container.
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          volumeMounts:
+            # Provide writable temporary storage for the read-only container.
+            - name: tmp
+              mountPath: /tmp
+
+            # Share structured application logs with the Fluent Bit sidecar.
+            - name: logs
+              mountPath: /var/log/app
+
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
+
+            # Load the S3 bucket name from the environment-specific secret.
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: s3-bucket-output
+                  key: bucket_name
+
+            - name: S3_REGION
+              value: "eu-west-2"
+
+            - name: SQS_QUEUE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justice-redact-sqs
+                  key: queue_url
+
+            - name: REDACTION_SQS_QUEUE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justice-redact-redaction-sqs
+                  key: queue_url
+                  optional: true
+
+            # Load the PostgreSQL connection details from the RDS secret.
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: rds-postgresql-instance-output
+                  key: rds_instance_address
+
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: rds-postgresql-instance-output
+                  key: database_name
+
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rds-postgresql-instance-output
+                  key: database_username
+
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rds-postgresql-instance-output
+                  key: database_password
+
+            # Allow the backend to assume the Analytical Platform Comprehend role.
+            - name: AP_COMPREHEND_ROLE_ARN
+              value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
+
+        - name: fluent-bit
+          image: fluent/fluent-bit:3.1
+          imagePullPolicy: Always
+
+          # Load the in-cluster OpenSearch proxy connection details.
+          env:
+            - name: OPENSEARCH_PROXY_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: opensearch-output
+                  key: proxy_host
+
+            - name: OPENSEARCH_PROXY_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: opensearch-output
+                  key: proxy_port
+
+          # Allocate lightweight resources for log forwarding.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+
+          # Run Fluent Bit as a restricted non-root container.
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          volumeMounts:
+            # Read application logs without allowing the sidecar to modify them.
+            - name: logs
+              mountPath: /var/log/app
+              readOnly: true
+
+            # Mount the Fluent Bit configuration files.
+            - name: fluent-bit-config
+              mountPath: /fluent-bit/etc
+              readOnly: true
+
+            # Provide writable storage for Fluent Bit tail offsets and buffering.
+            - name: fluent-bit-storage
+              mountPath: /var/log/flb-storage
+
+      volumes:
+        # Provide temporary writable storage for application processing.
+        - name: tmp
+          emptyDir: {}
+
+        # Share the application log file between containers.
+        - name: logs
+          emptyDir: {}
+
+        # Load the Fluent Bit configuration from the namespace ConfigMap.
+        - name: fluent-bit-config
+          configMap:
+            name: fluent-bit-config
+
+        # Persist Fluent Bit offsets for the lifetime of the pod.
+        - name: fluent-bit-storage
+          emptyDir: {}

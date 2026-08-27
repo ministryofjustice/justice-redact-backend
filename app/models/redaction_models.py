@@ -34,11 +34,28 @@ class ImageRedactionDecision(BaseModel):
     source: Literal["manual"]
 
 
+class PageDecision(BaseModel):
+    kind: Literal["page"]
+    pageNumber: int
+    action: Literal["exempt", "delete"]
+    source: Literal["manual"]
+
+
 RedactionDecision = (
-    TextRedactionDecision | TableRedactionDecision | ImageRedactionDecision
+    TextRedactionDecision
+    | TableRedactionDecision
+    | ImageRedactionDecision
+    | PageDecision
 )
 
 
 class ApplyRedactionsRequest(BaseModel):
     documentId: str
     decisions: list[RedactionDecision]
+    expectedRevision: int
+
+
+class SaveRedactionDecisionsRequest(BaseModel):
+    documentId: str
+    decisions: list[RedactionDecision]
+    expectedRevision: int

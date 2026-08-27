@@ -1,0 +1,35 @@
+[project]
+name = "justice-redact-backend"
+version = "0.1.0"
+description = "Backend API for Justice Redact"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.16,<2",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "pydantic",
+    "justice-redact",
+    "sqlalchemy",
+    "psycopg[binary]",
+    "python-dotenv>=1.2.2",
+    "pydantic-settings>=2.14.1",
+    "python-json-logger>=2.0.7", # Added for Opensearch logging
+    "boto3==1.43.6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.uv]
+system-certs = true
+package = false
+
+[tool.uv.sources]
+justice-redact = { git = "https://github.com/moj-analytical-services/justice-redact.git", rev = "6cf2afdb3be5876985b5d24613c3878122dbfa51" }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,89 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: justice-redact-db-migration-${MIGRATION_ID}
+  namespace: ${NAMESPACE}
+  labels:
+    app: justice-redact-backend
+    component: database-migration
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: justice-redact-backend
+        component: database-migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: ${SERVICE_ACCOUNT}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ${IMAGE}
+          imagePullPolicy: Always
+          command: ["alembic", "upgrade", "head"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: rds-postgresql-instance-output
+                  key: rds_instance_address
+
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: rds-postgresql-instance-output
+                  key: database_name
+
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rds-postgresql-instance-output
+                  key: database_username
+
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rds-postgresql-instance-output
+                  key: database_password
+
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: s3-bucket-output
+                  key: bucket_name
+
+            - name: S3_REGION
+              value: "eu-west-2"
+
+            - name: SQS_QUEUE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justice-redact-sqs
+                  key: queue_url
+                
+            - name: REDACTION_SQS_QUEUE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justice-redact-redaction-sqs
+                  key: queue_url
+                  optional: true

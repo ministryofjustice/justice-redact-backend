@@ -1,4 +1,4 @@
-name: 'Build, Push & Deploy Backend'
+name: Build, Push & Deploy Backend
 
 on:
   push:
@@ -6,6 +6,10 @@ on:
       - dev
       - staging
       - prod
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   set-environment:
@@ -30,45 +34,64 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ needs.set-environment.outputs.target_env }}
 
+    outputs:
+      image_uri: ${{ steps.build.outputs.image_uri }}
+
     permissions:
       id-token: write
-      contents: read
+      contents: write # Allows pushing git tags back to GitHub repository
 
     env:
       KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
+        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'prod')
+        uses: aws-actions/configure-aws-credentials@0d04879d366c9959065c153479c620d35e5c4097 # v3
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
           aws-region: eu-west-2
 
       - name: Log into ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
         id: login-ecr
+      
+      # 4. Obtain short-lived GitHub token for justice-redact dependency
+      - name: Obtain Octo STS Token
+        uses: octo-sts/action@6177b4481c00308b3839969c3eca88c96a91775f
+        id: octo_sts
+        with:
+          scope: moj-analytical-services/justice-redact
+          identity: ministryofjustice-justice-redact-backend
 
       - name: Build & Push to ECR
-        run: |
-          docker build -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
-          docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
+        id: build
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
           IMAGE_TAG: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ steps.octo_sts.outputs.token }}
+        run: |
+          DOCKER_BUILDKIT=1 docker build \
+            --secret id=github_token,env=GITHUB_TOKEN \
+            -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
+
+          docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
+          echo "image_uri=$REGISTRY/$REPOSITORY:python-$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Generate Kubernetes manifests
         run: |
           sudo apt-get update && sudo apt-get install -y gettext
-          mkdir -p k8s
+          mkdir -p k8s/app
 
           export TEAM_NAME=justice-redact
           export ENVIRONMENT="${{ needs.set-environment.outputs.target_env }}"
           export NAMESPACE="${KUBE_NAMESPACE}"
           export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
           export SERVICE_ACCOUNT="justice-redact-${ENVIRONMENT}"
+          export MIGRATION_ID="${GITHUB_SHA:0:12}-${GITHUB_RUN_ATTEMPT}"
 
           if [ "${ENVIRONMENT}" = "prod" ]; then
             export INGRESS_CLASS="default"
@@ -76,9 +99,17 @@ jobs:
             export INGRESS_CLASS="default-non-prod"
           fi
 
-          envsubst < deployments/templates/deployment.yml > k8s/deployment.yml
-          envsubst < deployments/templates/service.yml > k8s/service.yml
-          envsubst < deployments/templates/ingress.yml > k8s/ingress.yml
+          envsubst < deployments/templates/deployment.yml > k8s/app/deployment.yml
+          envsubst < deployments/templates/worker-deployment.yml > k8s/app/worker-deployment.yml
+          envsubst < deployments/templates/service.yml > k8s/app/service.yml
+          envsubst < deployments/templates/ingress.yml > k8s/app/ingress.yml
+          envsubst < deployments/templates/migration-job.yml > k8s/migration-job.yml
+          envsubst < deployments/templates/hpa.yml > k8s/app/hpa.yml
+          envsubst < deployments/templates/worker-hpa.yml > k8s/app/worker-hpa.yml
+          envsubst < deployments/templates/redaction-worker-deployment.yml > k8s/app/redaction-worker-deployment.yml
+          envsubst < deployments/templates/redaction-worker-hpa.yml > k8s/app/redaction-worker-hpa.yml
+          
+          envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
@@ -99,12 +130,74 @@ jobs:
 
       - name: Validate Kubernetes Manifests
         run: |
-          kubectl apply --filename=k8s/ --dry-run=client
+          kubectl apply --filename=k8s/ --recursive --dry-run=client
 
       - name: Verify cluster access
         run: |
           kubectl get pods -n ${KUBE_NAMESPACE}
 
+      - name: Run database migrations
+        run: |
+          kubectl apply --filename=k8s/migration-job.yml --namespace=${KUBE_NAMESPACE}
+          kubectl wait \
+            --for=condition=complete \
+            --timeout=10m \
+            --filename=k8s/migration-job.yml \
+            --namespace=${KUBE_NAMESPACE}
+
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply --filename=k8s/ --namespace=${KUBE_NAMESPACE}
+          kubectl apply --filename=k8s/app/ --namespace=${KUBE_NAMESPACE}
+
+      # Create deployment tag (Staging & Prod only)
+      - name: Create deployment tag
+        if: success() && needs.set-environment.outputs.target_env != 'dev'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Read version from package.json if present, or default to 0.0.0
+          VERSION=$(node -p "try { require('./package.json').version } catch(e) { '0.0.0' }")
+          TARGET_ENV="${{ needs.set-environment.outputs.target_env }}"
+          RUN_NUM="${{ github.run_number }}"
+
+          case "$TARGET_ENV" in
+            staging)
+              TAG="staging-v${VERSION}-${RUN_NUM}"
+              ;;
+            prod)
+              TAG="v${VERSION}"
+              ;;
+            *)
+              TAG="${TARGET_ENV}-v${VERSION}-${RUN_NUM}"
+              ;;
+          esac
+
+          echo "Creating tag: $TAG"
+
+          if [ "$TARGET_ENV" = "prod" ]; then
+            git tag -f -a "$TAG" -m "Deployed v$VERSION to $TARGET_ENV [skip ci]"
+            git push origin "$TAG" --force
+          else
+            git tag -a "$TAG" -m "Deployed v$VERSION to $TARGET_ENV [skip ci]"
+            git push origin "$TAG"
+          fi
+
+  # JOB 3: Snyk container + code scan against the image just pushed
+  sast:
+    name: Run SaST tooling
+    needs: [set-environment, ecr_and_deploy]
+    uses: ministryofjustice/laa-reusable-github-actions/.github/workflows/sast.yml@932ee576d65d9992ca82955a5823e3d55e888417
+    permissions:
+      actions: read
+      id-token: write
+      contents: read
+      security-events: write
+    with:
+      image_uri: ${{ needs.ecr_and_deploy.outputs.image_uri }}
+      dockerfile_path: Dockerfile
+      minimum_threshold: high
+    secrets:
+      SNYK_CLIENT_ID: ${{ secrets.SNYK_CLIENT_ID }}
+      SNYK_CLIENT_SECRET: ${{ secrets.SNYK_CLIENT_SECRET }}
+      ECR_ROLE_TO_ASSUME: ${{ secrets.ECR_ROLE_TO_ASSUME }}
