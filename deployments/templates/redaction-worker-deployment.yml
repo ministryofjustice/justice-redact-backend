@@ -74,14 +74,14 @@ spec:
             - name: SQS_QUEUE_URL
               valueFrom:
                 secretKeyRef:
-                  name: justice-redact-sqs
+                  name: ${NAMESPACE}-sqs
                   key: queue_url
 
             # This worker consumes only the Apply Redactions queue.
             - name: REDACTION_SQS_QUEUE_URL
               valueFrom:
                 secretKeyRef:
-                  name: justice-redact-redaction-sqs
+                  name: ${NAMESPACE}-redaction-sqs
                   key: queue_url
 
             - name: DB_HOST
