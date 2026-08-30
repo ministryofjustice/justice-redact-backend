@@ -89,7 +89,7 @@ async def test_get_document_export_returns_requested_current_completed_run(
 
 
 @pytest.mark.anyio
-async def test_get_document_export_rejects_superseded_run(
+async def test_get_document_export_returns_superseded_completed_run_metadata(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -97,6 +97,7 @@ async def test_get_document_export_rejects_superseded_run(
         "get_document_or_404",
         lambda document_id: _document(
             current_run_id="run-new",
+            status="applying_redactions",
         ),
     )
 
@@ -107,14 +108,39 @@ async def test_get_document_export_rejects_superseded_run(
         raising=False,
     )
 
-    with pytest.raises(HTTPException) as exc_info:
-        await exports.get_document_export(
-            "document-123",
-            "run-old",
-        )
+    monkeypatch.setattr(
+        exports,
+        "object_exists_in_s3",
+        lambda key: True,
+    )
 
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.detail == "Redaction run has been superseded"
+    response = await exports.get_document_export(
+        "document-123",
+        "run-old",
+    )
+
+    assert response == {
+        "documentId": "document-123",
+        "runId": "run-old",
+        "filename": "example.pdf",
+        "status": "redaction_complete",
+        "redactedExportUrl": (
+            "/documents/document-123/redaction-runs/run-old/redacted-file"
+        ),
+        "vettedExportUrl": (
+            "/documents/document-123/redaction-runs/run-old/vetted-file"
+        ),
+        "exemptExportUrl": (
+            "/documents/document-123/redaction-runs/run-old/exempt-file"
+        ),
+        "pageCount": 10,
+        "pageCounts": {
+            "original": 10,
+            "exempt": 1,
+            "deleted": 2,
+            "redacted": 7,
+        },
+    }
 
 
 @pytest.mark.anyio

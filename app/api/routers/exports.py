@@ -14,9 +14,8 @@ from app.services.s3_service import get_object_from_s3, object_exists_in_s3
 router = APIRouter(prefix="/documents", tags=["exports"])
 
 
-def _get_current_completed_run(
+def _get_completed_run(
     *,
-    document: dict,
     document_id: str,
     run_id: str,
 ) -> dict:
@@ -28,16 +27,7 @@ def _get_current_completed_run(
             detail="Redaction run not found",
         )
 
-    if document.get("currentRedactionRunId") != run_id:
-        raise HTTPException(
-            status_code=409,
-            detail="Redaction run has been superseded",
-        )
-
-    if (
-        document.get("status") != "redaction_complete"
-        or redaction_run.get("status") != "completed"
-    ):
+    if redaction_run.get("status") != "completed":
         raise HTTPException(
             status_code=409,
             detail="Redaction run is not available for export",
@@ -52,6 +42,32 @@ def _get_current_completed_run(
     return redaction_run
 
 
+def _get_current_completed_run(
+    *,
+    document: dict,
+    document_id: str,
+    run_id: str,
+) -> dict:
+    redaction_run = _get_completed_run(
+        document_id=document_id,
+        run_id=run_id,
+    )
+
+    if document.get("currentRedactionRunId") != run_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Redaction run has been superseded",
+        )
+
+    if document.get("status") != "redaction_complete":
+        raise HTTPException(
+            status_code=409,
+            detail="Redaction run is not available for export",
+        )
+
+    return redaction_run
+
+
 @router.get("/{document_id}/redaction-runs/{run_id}/export")
 async def get_document_export(
     document_id: str,
@@ -59,8 +75,7 @@ async def get_document_export(
 ):
     document = get_document_or_404(document_id)
 
-    redaction_run = _get_current_completed_run(
-        document=document,
+    redaction_run = _get_completed_run(
         document_id=document_id,
         run_id=run_id,
     )
