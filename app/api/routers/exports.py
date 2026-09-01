@@ -3,8 +3,7 @@ from fastapi.responses import Response
 
 from app.logging_config import logger
 from app.services.document_store import get_document_or_404
-from app.services.redaction_decision_store import get_redaction_decisions
-from app.services.review_result_store import get_review_result
+from app.services.redaction_run_store import get_redaction_run
 from app.services.s3_keys import (
     redaction_run_exempt_pdf_key,
     redaction_run_redacted_pdf_key,
@@ -15,36 +14,71 @@ from app.services.s3_service import get_object_from_s3, object_exists_in_s3
 router = APIRouter(prefix="/documents", tags=["exports"])
 
 
-def _count_page_decisions(
-    decision_set: dict | None,
-    action: str,
-    total_pages: int,
-) -> int:
-    decisions = decision_set.get("decisions", []) if decision_set else []
+def _get_completed_run(
+    *,
+    document_id: str,
+    run_id: str,
+) -> dict:
+    redaction_run = get_redaction_run(run_id)
 
-    return len(
-        {
-            decision.get("pageNumber")
-            for decision in decisions
-            if decision.get("kind") == "page"
-            and decision.get("action") == action
-            and isinstance(decision.get("pageNumber"), int)
-            and 1 <= decision.get("pageNumber") <= total_pages
-        }
-    )
-
-
-@router.get("/{document_id}/export")
-async def get_document_export(document_id: str):
-    document = get_document_or_404(document_id)
-
-    run_id = document.get("currentRedactionRunId")
-
-    if not run_id:
+    if redaction_run is None or redaction_run.get("documentId") != document_id:
         raise HTTPException(
             status_code=404,
             detail="Redaction run not found",
         )
+
+    if redaction_run.get("status") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Redaction run is not available for export",
+        )
+
+    if redaction_run.get("pageCounts") is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Completed redaction run has no page counts",
+        )
+
+    return redaction_run
+
+
+def _get_current_completed_run(
+    *,
+    document: dict,
+    document_id: str,
+    run_id: str,
+) -> dict:
+    redaction_run = _get_completed_run(
+        document_id=document_id,
+        run_id=run_id,
+    )
+
+    if document.get("currentRedactionRunId") != run_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Redaction run has been superseded",
+        )
+
+    if document.get("status") != "redaction_complete":
+        raise HTTPException(
+            status_code=409,
+            detail="Redaction run is not available for export",
+        )
+
+    return redaction_run
+
+
+@router.get("/{document_id}/redaction-runs/{run_id}/export")
+async def get_document_export(
+    document_id: str,
+    run_id: str,
+):
+    document = get_document_or_404(document_id)
+
+    redaction_run = _get_completed_run(
+        document_id=document_id,
+        run_id=run_id,
+    )
 
     redacted_key = redaction_run_redacted_pdf_key(
         document_id,
@@ -62,18 +96,19 @@ async def get_document_export(document_id: str):
     )
 
     if not object_exists_in_s3(redacted_key):
-        # "reason" field lets these three distinct failure cases be told
-        # apart in OpenSearch even though they share the same event name
-        # and status code.
         logger.warning(
             "document_export_failed",
             extra={
                 "event": "document_export_failed",
                 "reason": "redacted_file_not_found",
                 "document_id": document_id,
+                "run_id": run_id,
             },
         )
-        raise HTTPException(status_code=404, detail="Redacted file not found")
+        raise HTTPException(
+            status_code=500,
+            detail="Redacted file not found",
+        )
 
     if not object_exists_in_s3(vetted_key):
         logger.warning(
@@ -82,78 +117,66 @@ async def get_document_export(document_id: str):
                 "event": "document_export_failed",
                 "reason": "vetted_file_not_found",
                 "document_id": document_id,
+                "run_id": run_id,
             },
         )
-        raise HTTPException(status_code=404, detail="Vetted file not found")
+        raise HTTPException(
+            status_code=500,
+            detail="Vetted file not found",
+        )
 
     exempt_exists = object_exists_in_s3(exempt_key)
 
-    page_count = None
-    review_result = get_review_result(document_id)
+    page_counts = redaction_run["pageCounts"]
+    original_page_count = page_counts["original"]
 
-    if review_result is not None:
-        page_count = review_result.get("summary", {}).get("totalPages")
-
-    decision_set = get_redaction_decisions(document_id)
-
-    original_page_count = page_count or 0
-    exempt_page_count = _count_page_decisions(
-        decision_set, "exempt", original_page_count
-    )
-    deleted_page_count = _count_page_decisions(
-        decision_set, "delete", original_page_count
-    )
-    redacted_page_count = max(
-        original_page_count - exempt_page_count - deleted_page_count,
-        0,
-    )
-
-    # Success event, logged once all three files are confirmed present and
-    # page counts are computed - gives a per-export audit trail of exactly
-    # how many pages were exempted/deleted/redacted.
     logger.info(
         "document_export_generated",
         extra={
             "event": "document_export_generated",
             "document_id": document_id,
-            "original_page_count": original_page_count,
-            "exempt_page_count": exempt_page_count,
-            "deleted_page_count": deleted_page_count,
-            "redacted_page_count": redacted_page_count,
+            "run_id": run_id,
+            "original_page_count": page_counts["original"],
+            "exempt_page_count": page_counts["exempt"],
+            "deleted_page_count": page_counts["deleted"],
+            "redacted_page_count": page_counts["redacted"],
             "exempt_file_included": exempt_exists,
         },
     )
 
     return {
         "documentId": document_id,
+        "runId": run_id,
         "filename": document["filename"],
         "status": "redaction_complete",
-        "redactedExportUrl": f"{router.prefix}/{document_id}/redacted-file",
-        "vettedExportUrl": f"{router.prefix}/{document_id}/vetted-file",
-        "exemptExportUrl": (
-            f"{router.prefix}/{document_id}/exempt-file" if exempt_exists else None
+        "redactedExportUrl": (
+            f"{router.prefix}/{document_id}" f"/redaction-runs/{run_id}/redacted-file"
         ),
-        "pageCount": page_count,
-        "pageCounts": {
-            "original": original_page_count,
-            "exempt": exempt_page_count,
-            "deleted": deleted_page_count,
-            "redacted": redacted_page_count,
-        },
+        "vettedExportUrl": (
+            f"{router.prefix}/{document_id}" f"/redaction-runs/{run_id}/vetted-file"
+        ),
+        "exemptExportUrl": (
+            f"{router.prefix}/{document_id}" f"/redaction-runs/{run_id}/exempt-file"
+            if exempt_exists
+            else None
+        ),
+        "pageCount": original_page_count,
+        "pageCounts": page_counts,
     }
 
 
-@router.get("/{document_id}/redacted-file")
-async def download_redacted_file(document_id: str):
+@router.get("/{document_id}/redaction-runs/{run_id}/redacted-file")
+async def download_redacted_file(
+    document_id: str,
+    run_id: str,
+):
     document = get_document_or_404(document_id)
 
-    run_id = document.get("currentRedactionRunId")
-
-    if not run_id:
-        raise HTTPException(
-            status_code=404,
-            detail="Redaction run not found",
-        )
+    _get_current_completed_run(
+        document=document,
+        document_id=document_id,
+        run_id=run_id,
+    )
 
     key = redaction_run_redacted_pdf_key(
         document_id,
@@ -161,20 +184,22 @@ async def download_redacted_file(document_id: str):
     )
 
     if not object_exists_in_s3(key):
-        raise HTTPException(status_code=404, detail="Exported file not found")
+        raise HTTPException(
+            status_code=500,
+            detail="Exported file not found",
+        )
 
     original_name = document.get("filename", "redacted.pdf")
     download_name = original_name.replace(".pdf", "_redacted.pdf")
 
     pdf_bytes = get_object_from_s3(key)
 
-    # "file_kind" distinguishes this from the vetted-file/exempt-file
-    # download events below, which share the same event name.
     logger.info(
         "document_file_downloaded",
         extra={
             "event": "document_file_downloaded",
             "document_id": document_id,
+            "run_id": run_id,
             "file_kind": "redacted",
         },
     )
@@ -188,17 +213,18 @@ async def download_redacted_file(document_id: str):
     )
 
 
-@router.get("/{document_id}/vetted-file")
-async def download_vetted_file(document_id: str):
+@router.get("/{document_id}/redaction-runs/{run_id}/vetted-file")
+async def download_vetted_file(
+    document_id: str,
+    run_id: str,
+):
     document = get_document_or_404(document_id)
 
-    run_id = document.get("currentRedactionRunId")
-
-    if not run_id:
-        raise HTTPException(
-            status_code=404,
-            detail="Redaction run not found",
-        )
+    _get_current_completed_run(
+        document=document,
+        document_id=document_id,
+        run_id=run_id,
+    )
 
     key = redaction_run_vetted_pdf_key(
         document_id,
@@ -206,7 +232,10 @@ async def download_vetted_file(document_id: str):
     )
 
     if not object_exists_in_s3(key):
-        raise HTTPException(status_code=404, detail="Vetted file not found")
+        raise HTTPException(
+            status_code=500,
+            detail="Vetted file not found",
+        )
 
     original_name = document.get("filename", "vetted.pdf")
     download_name = original_name.replace(".pdf", "_vetted.pdf")
@@ -218,6 +247,7 @@ async def download_vetted_file(document_id: str):
         extra={
             "event": "document_file_downloaded",
             "document_id": document_id,
+            "run_id": run_id,
             "file_kind": "vetted",
         },
     )
@@ -231,17 +261,18 @@ async def download_vetted_file(document_id: str):
     )
 
 
-@router.get("/{document_id}/exempt-file")
-async def download_exempt_file(document_id: str):
+@router.get("/{document_id}/redaction-runs/{run_id}/exempt-file")
+async def download_exempt_file(
+    document_id: str,
+    run_id: str,
+):
     document = get_document_or_404(document_id)
 
-    run_id = document.get("currentRedactionRunId")
-
-    if not run_id:
-        raise HTTPException(
-            status_code=404,
-            detail="Redaction run not found",
-        )
+    _get_current_completed_run(
+        document=document,
+        document_id=document_id,
+        run_id=run_id,
+    )
 
     key = redaction_run_exempt_pdf_key(
         document_id,
@@ -249,7 +280,10 @@ async def download_exempt_file(document_id: str):
     )
 
     if not object_exists_in_s3(key):
-        raise HTTPException(status_code=404, detail="Exempt file not found")
+        raise HTTPException(
+            status_code=500,
+            detail="Exempt file not found",
+        )
 
     original_name = document.get("filename", "exempt.pdf")
     download_name = original_name.replace(".pdf", "_exempt.pdf")
@@ -261,6 +295,7 @@ async def download_exempt_file(document_id: str):
         extra={
             "event": "document_file_downloaded",
             "document_id": document_id,
+            "run_id": run_id,
             "file_kind": "exempt",
         },
     )

@@ -9,6 +9,7 @@ from app.models.redaction_models import (
     SaveRedactionDecisionsRequest,
 )
 from app.services.redaction_run_store import (
+    cancel_redaction_run,
     create_redaction_run,
     fail_redaction_run_enqueue,
     mark_redaction_run_queued,
@@ -185,4 +186,41 @@ async def apply_redactions(
         "documentId": document_id,
         "runId": run_id,
         "status": "queued",
+    }
+
+
+@router.post("/{document_id}/redaction-runs/{run_id}/cancel")
+async def cancel_redactions(
+    document_id: str,
+    run_id: str,
+):
+    get_document_or_404(document_id)
+
+    cancelled = cancel_redaction_run(
+        document_id=document_id,
+        run_id=run_id,
+    )
+
+    if not cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This redaction run cannot be cancelled because "
+                "it is no longer the current active run"
+            ),
+        )
+
+    logger.info(
+        "redaction_run_cancelled",
+        extra={
+            "event": "redaction_run_cancelled",
+            "document_id": document_id,
+            "run_id": run_id,
+        },
+    )
+
+    return {
+        "documentId": document_id,
+        "runId": run_id,
+        "status": "cancelled",
     }

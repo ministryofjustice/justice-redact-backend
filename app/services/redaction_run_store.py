@@ -265,6 +265,68 @@ def fail_redaction_run_enqueue(
         return True
 
 
+def cancel_redaction_run(
+    *,
+    document_id: str,
+    run_id: str,
+) -> bool:
+    now = datetime.now(timezone.utc)
+
+    with SessionLocal() as session:
+        document = session.execute(
+            select(Document)
+            .where(Document.document_id == document_id)
+            .with_for_update()
+        ).scalar_one_or_none()
+
+        if document is None:
+            return False
+
+        redaction_run = session.execute(
+            select(RedactionRun)
+            .where(
+                RedactionRun.run_id == run_id,
+                RedactionRun.document_id == document_id,
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+
+        if redaction_run is None:
+            return False
+
+        # A stale tab must never be able to cancel a newer Apply run.
+        if document.current_redaction_run_id != run_id:
+            return False
+
+        if document.status != "applying_redactions":
+            return False
+
+        if redaction_run.status not in {
+            "enqueueing",
+            "queued",
+            "processing",
+            "retrying",
+        }:
+            return False
+
+        redaction_run.status = "cancelled"
+        redaction_run.cancelled_at = now
+        redaction_run.claim_id = None
+        redaction_run.lease_expires_at = None
+
+        # Return the durable document/review state to Review.
+        # Saved redaction decisions remain untouched.
+        document.current_redaction_run_id = None
+        document.status = "ready_for_review"
+        document.redaction_started_at = None
+        document.redaction_completed_at = None
+        document.error_message = None
+
+        session.commit()
+
+        return True
+
+
 def claim_redaction_run(
     *,
     run_id: str,

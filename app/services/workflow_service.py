@@ -98,6 +98,7 @@ def build_workflow_response(document: dict) -> dict:
     return {
         "documentId": document["documentId"],
         "status": document["status"],
+        "currentRedactionRunId": document.get("currentRedactionRunId"),
         "preferredPage": navigation.preferred_page,
         "allowedPages": allowed_pages,
     }
