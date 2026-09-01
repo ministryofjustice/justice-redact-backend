@@ -80,7 +80,7 @@ spec:
                 secretKeyRef:
                   name: ${NAMESPACE}-sqs
                   key: queue_url
-                
+
             - name: REDACTION_SQS_QUEUE_URL
               valueFrom:
                 secretKeyRef:
