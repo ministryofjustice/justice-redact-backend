@@ -534,6 +534,108 @@ def test_fail_redaction_run_marks_terminal_failure_on_run_and_document(
     assert session.committed is True
 
 
+def test_cancel_redaction_run_returns_document_to_review(
+    monkeypatch,
+):
+    document = SimpleNamespace(
+        document_id="document-123",
+        current_redaction_run_id="run-123",
+        status="applying_redactions",
+        redaction_started_at=datetime.now(timezone.utc),
+        redaction_completed_at=None,
+        error_message=None,
+    )
+
+    redaction_run = SimpleNamespace(
+        run_id="run-123",
+        document_id="document-123",
+        status="processing",
+        cancelled_at=None,
+        claim_id="claim-123",
+        lease_expires_at=datetime.now(timezone.utc),
+    )
+
+    session = FakeRunTransitionSession(
+        document=document,
+        redaction_run=redaction_run,
+    )
+
+    monkeypatch.setattr(
+        redaction_run_store,
+        "SessionLocal",
+        lambda: session,
+    )
+
+    result = redaction_run_store.cancel_redaction_run(
+        document_id="document-123",
+        run_id="run-123",
+    )
+
+    assert result is True
+
+    assert redaction_run.status == "cancelled"
+    assert redaction_run.cancelled_at is not None
+    assert redaction_run.claim_id is None
+    assert redaction_run.lease_expires_at is None
+
+    assert document.current_redaction_run_id is None
+    assert document.status == "ready_for_review"
+    assert document.redaction_started_at is None
+    assert document.redaction_completed_at is None
+    assert document.error_message is None
+
+    assert session.committed is True
+
+
+def test_cancel_redaction_run_rejects_stale_run(
+    monkeypatch,
+):
+    document = SimpleNamespace(
+        document_id="document-123",
+        current_redaction_run_id="new-run",
+        status="applying_redactions",
+        redaction_started_at=datetime.now(timezone.utc),
+        redaction_completed_at=None,
+        error_message=None,
+    )
+
+    redaction_run = SimpleNamespace(
+        run_id="old-run",
+        document_id="document-123",
+        status="processing",
+        cancelled_at=None,
+        claim_id="old-claim",
+        lease_expires_at=datetime.now(timezone.utc),
+    )
+
+    session = FakeRunTransitionSession(
+        document=document,
+        redaction_run=redaction_run,
+    )
+
+    monkeypatch.setattr(
+        redaction_run_store,
+        "SessionLocal",
+        lambda: session,
+    )
+
+    result = redaction_run_store.cancel_redaction_run(
+        document_id="document-123",
+        run_id="old-run",
+    )
+
+    assert result is False
+
+    assert redaction_run.status == "processing"
+    assert redaction_run.cancelled_at is None
+    assert redaction_run.claim_id == "old-claim"
+
+    assert document.current_redaction_run_id == "new-run"
+    assert document.status == "applying_redactions"
+
+    assert session.committed is False
+
+
 def test_complete_redaction_run_rejects_stale_worker(
     monkeypatch,
 ):

@@ -21,6 +21,7 @@ async def test_get_document_workflow_returns_authoritative_navigation(monkeypatc
     assert response == {
         "documentId": "document-123",
         "status": "ready_for_review",
+        "currentRedactionRunId": None,
         "preferredPage": "review",
         "allowedPages": ["review"],
     }
@@ -66,6 +67,8 @@ async def test_acknowledge_document_warning_persists_acknowledgement(monkeypatch
     assert response["preferredPage"] == "subject-details"
     assert response["allowedPages"] == ["subject-details"]
 
+    assert response["currentRedactionRunId"] is None
+
 
 @pytest.mark.anyio
 async def test_abandon_document_invalidates_processing_and_returns_upload_workflow(
@@ -108,6 +111,7 @@ async def test_abandon_document_invalidates_processing_and_returns_upload_workfl
     assert response == {
         "documentId": "document-123",
         "status": "abandoned",
+        "currentRedactionRunId": None,
         "preferredPage": "upload",
         "allowedPages": ["upload"],
     }
@@ -187,6 +191,7 @@ async def test_abandon_document_still_succeeds_when_s3_cleanup_fails(
     assert response == {
         "documentId": "document-123",
         "status": "abandoned",
+        "currentRedactionRunId": None,
         "preferredPage": "upload",
         "allowedPages": ["upload"],
     }

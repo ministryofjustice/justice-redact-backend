@@ -158,6 +158,7 @@ def test_build_workflow_response_for_review_document():
     assert response == {
         "documentId": "document-123",
         "status": "ready_for_review",
+        "currentRedactionRunId": None,
         "preferredPage": "review",
         "allowedPages": ["review"],
     }
@@ -178,6 +179,7 @@ def test_build_workflow_response_for_unacknowledged_warning():
     assert response == {
         "documentId": "document-123",
         "status": "uploaded",
+        "currentRedactionRunId": None,
         "preferredPage": "document-warning",
         "allowedPages": ["document-warning"],
     }
@@ -198,6 +200,29 @@ def test_build_workflow_response_treats_acknowledgement_timestamp_as_acknowledge
     assert response == {
         "documentId": "document-123",
         "status": "uploaded",
+        "currentRedactionRunId": None,
         "preferredPage": "subject-details",
         "allowedPages": ["subject-details"],
+    }
+
+
+def test_build_workflow_response_includes_current_redaction_run_id():
+    from app.services.workflow_service import build_workflow_response
+
+    response = build_workflow_response(
+        {
+            "documentId": "document-123",
+            "status": "redaction_complete",
+            "currentRedactionRunId": "run-456",
+            "warningReason": None,
+            "warningAcknowledgedAt": None,
+        }
+    )
+
+    assert response == {
+        "documentId": "document-123",
+        "status": "redaction_complete",
+        "currentRedactionRunId": "run-456",
+        "preferredPage": "export",
+        "allowedPages": ["review", "export"],
     }
