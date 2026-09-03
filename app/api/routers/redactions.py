@@ -47,7 +47,9 @@ async def save_document_redaction_decisions(
         document_id=document_id,
         decisions_json={
             "documentId": request.documentId,
-            "decisions": [decision.model_dump() for decision in request.decisions],
+            "decisions": [
+                decision.model_dump(exclude_none=True) for decision in request.decisions
+            ],
         },
         expected_revision=request.expectedRevision,
     )

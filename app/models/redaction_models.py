@@ -12,6 +12,7 @@ class TextRedactionDecision(BaseModel):
     text: str
     action: Literal["redact"]
     source: Literal["manual"]
+    redactionGroupId: str | None = None
 
 
 class TableRedactionDecision(BaseModel):
@@ -24,6 +25,7 @@ class TableRedactionDecision(BaseModel):
     text: str
     action: Literal["redact"]
     source: Literal["manual"]
+    redactionGroupId: str | None = None
 
 
 class ImageRedactionDecision(BaseModel):
