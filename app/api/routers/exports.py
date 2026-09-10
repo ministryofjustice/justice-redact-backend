@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from app.logging_config import logger
 from app.services.document_store import get_document_or_404
@@ -75,7 +77,8 @@ async def get_document_export(
 ):
     document = get_document_or_404(document_id)
 
-    redaction_run = _get_completed_run(
+    redaction_run = _get_current_completed_run(
+        document=document,
         document_id=document_id,
         run_id=run_id,
     )
@@ -160,9 +163,112 @@ async def get_document_export(
             if exempt_exists
             else None
         ),
+        "allFilesExportUrl": (
+            f"{router.prefix}/{document_id}" f"/redaction-runs/{run_id}/all-files"
+        ),
         "pageCount": original_page_count,
         "pageCounts": page_counts,
     }
+
+
+@router.get("/{document_id}/redaction-runs/{run_id}/all-files")
+async def download_all_files(
+    document_id: str,
+    run_id: str,
+):
+    document = get_document_or_404(document_id)
+
+    _get_current_completed_run(
+        document=document,
+        document_id=document_id,
+        run_id=run_id,
+    )
+
+    redacted_key = redaction_run_redacted_pdf_key(
+        document_id,
+        run_id,
+    )
+
+    vetted_key = redaction_run_vetted_pdf_key(
+        document_id,
+        run_id,
+    )
+
+    exempt_key = redaction_run_exempt_pdf_key(
+        document_id,
+        run_id,
+    )
+
+    if not object_exists_in_s3(redacted_key):
+        raise HTTPException(
+            status_code=500,
+            detail="Redacted file not found",
+        )
+
+    if not object_exists_in_s3(vetted_key):
+        raise HTTPException(
+            status_code=500,
+            detail="Vetted file not found",
+        )
+
+    exempt_exists = object_exists_in_s3(exempt_key)
+
+    original_name = document.get(
+        "filename",
+        "document.pdf",
+    )
+
+    if original_name.lower().endswith(".pdf"):
+        base_name = original_name[:-4]
+    else:
+        base_name = original_name
+
+    redacted_name = f"{base_name}_redacted.pdf"
+    vetted_name = f"{base_name}_vetted.pdf"
+    exempt_name = f"{base_name}_exempt.pdf"
+    zip_name = f"{base_name}_files.zip"
+
+    zip_buffer = BytesIO()
+
+    with ZipFile(
+        zip_buffer,
+        mode="w",
+        compression=ZIP_DEFLATED,
+    ) as archive:
+        archive.writestr(
+            redacted_name,
+            get_object_from_s3(redacted_key),
+        )
+
+        archive.writestr(
+            vetted_name,
+            get_object_from_s3(vetted_key),
+        )
+
+        if exempt_exists:
+            archive.writestr(
+                exempt_name,
+                get_object_from_s3(exempt_key),
+            )
+
+    logger.info(
+        "document_file_downloaded",
+        extra={
+            "event": "document_file_downloaded",
+            "document_id": document_id,
+            "run_id": run_id,
+            "file_kind": "all",
+            "exempt_file_included": exempt_exists,
+        },
+    )
+
+    return Response(
+        content=zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{zip_name}"',
+        },
+    )
 
 
 @router.get("/{document_id}/redaction-runs/{run_id}/redacted-file")
