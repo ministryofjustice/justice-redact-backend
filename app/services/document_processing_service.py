@@ -14,6 +14,9 @@ from app.services.review_result_store import (
 from app.services.s3_keys import (
     document_geometry_chunk_key,
     document_geometry_manifest_key,
+    document_review_chunk_key,
+    document_review_manifest_key,
+    document_review_search_chunk_key,
     preview_image_key,
 )
 from app.services.s3_service import (
@@ -103,6 +106,105 @@ def build_page_chunks(
         )
 
     return chunks
+
+
+def build_review_search_pages(
+    review_pages: list[dict],
+) -> list[dict]:
+    search_pages = []
+
+    for page in review_pages:
+        search_tables = []
+
+        for table in page.get("tables", []):
+            search_rows = []
+
+            for row in table.get("rows", []):
+                search_cells = []
+
+                for cell in row.get("cells", []):
+                    search_cells.append(
+                        {
+                            "cellId": cell["cellId"],
+                            "tableId": (cell.get("tableId") or table["tableId"]),
+                            "rowIndex": cell.get(
+                                "rowIndex",
+                                row.get("rowIndex", 0),
+                            ),
+                            "colIndex": cell.get(
+                                "colIndex",
+                                0,
+                            ),
+                            "text": cell.get(
+                                "text",
+                                "",
+                            ),
+                            "renderText": cell.get(
+                                "text",
+                                "",
+                            ),
+                            "bbox": None,
+                            "isHeader": bool(
+                                cell.get(
+                                    "isHeader",
+                                    False,
+                                )
+                            ),
+                            "isNumeric": bool(
+                                cell.get(
+                                    "isNumeric",
+                                    False,
+                                )
+                            ),
+                        }
+                    )
+
+                search_rows.append(
+                    {
+                        "rowIndex": row.get(
+                            "rowIndex",
+                            0,
+                        ),
+                        "cells": search_cells,
+                    }
+                )
+
+            search_tables.append(
+                {
+                    "tableId": table["tableId"],
+                    "bbox": None,
+                    "rows": search_rows,
+                }
+            )
+
+        search_pages.append(
+            {
+                "pageNumber": page["pageNumber"],
+                "pageId": page.get("pageId"),
+                "textItems": [
+                    {
+                        "itemId": item["itemId"],
+                        "text": item.get(
+                            "text",
+                            "",
+                        ),
+                        "renderText": item.get(
+                            "text",
+                            "",
+                        ),
+                        "bbox": None,
+                    }
+                    for item in page.get(
+                        "textItems",
+                        [],
+                    )
+                ],
+                "tables": search_tables,
+                "images": [],
+            }
+        )
+
+    return search_pages
 
 
 def process_document_pipeline(
@@ -197,7 +299,6 @@ def process_document_pipeline(
             time.perf_counter() - start,
         )
 
-        combined_pages = []
         combined_findings = []
         total_text_items = 0
 
@@ -260,8 +361,6 @@ def process_document_pipeline(
                 chunk_index=chunk_index,
                 chunk_count=len(chunks),
             )
-
-            combined_pages.extend(chunk_result.get("pages", []))
 
             for finding in chunk_result.get(
                 "findings",
@@ -335,6 +434,65 @@ def process_document_pipeline(
                 chunk_count=len(chunks),
             )
 
+            review_chunk = {
+                "chunkIndex": chunk_index,
+                "pageStart": page_start,
+                "pageEnd": page_end,
+                "pages": chunk_result.get("pages", []),
+            }
+
+            start = time.perf_counter()
+
+            upload_json_to_s3(
+                review_chunk,
+                document_review_chunk_key(
+                    document_id,
+                    chunk_index,
+                ),
+            )
+
+            _log_stage(
+                "upload_document_review_chunk",
+                document_id,
+                time.perf_counter() - start,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                page_start=page_start,
+                page_end=page_end,
+            )
+
+            search_pages = build_review_search_pages(chunk_result.get("pages", []))
+
+            search_chunk = {
+                "chunkIndex": chunk_index,
+                "pageStart": page_start,
+                "pageEnd": page_end,
+                "pages": search_pages,
+            }
+
+            start = time.perf_counter()
+
+            upload_json_to_s3(
+                search_chunk,
+                document_review_search_chunk_key(
+                    document_id,
+                    chunk_index,
+                ),
+            )
+
+            _log_stage(
+                "upload_document_review_search_chunk",
+                document_id,
+                time.perf_counter() - start,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                page_start=page_start,
+                page_end=page_end,
+            )
+
+            del review_chunk
+            del search_chunk
+            del search_pages
             del chunk_result
             del chunk_document
 
@@ -357,6 +515,19 @@ def process_document_pipeline(
             time.perf_counter() - start,
         )
 
+        start = time.perf_counter()
+
+        upload_json_to_s3(
+            manifest,
+            document_review_manifest_key(document_id),
+        )
+
+        _log_stage(
+            "upload_document_review_manifest",
+            document_id,
+            time.perf_counter() - start,
+        )
+
         result = {
             "summary": {
                 "totalPages": page_count,
@@ -368,7 +539,7 @@ def process_document_pipeline(
                 "subjectPrisonNumber": (document["subjectPrisonNumber"] or ""),
                 "otherPhrases": other_phrases_list,
             },
-            "pages": combined_pages,
+            "pages": [],
             "findings": combined_findings,
             "documentId": document_id,
             "filename": document["filename"],
