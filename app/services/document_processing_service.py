@@ -1,26 +1,34 @@
-from pathlib import Path
-import pymupdf
-import shutil
 from datetime import datetime, timezone
+import json
+from pathlib import Path
+import shutil
+import time
+
+import pymupdf
+
 from app.logging_config import logger
 from app.services.document_store import get_document
 from app.services.review_result_store import (
     publish_review_result_if_processing_owner,
+)
+from app.services.s3_keys import (
+    document_geometry_chunk_key,
+    document_geometry_manifest_key,
+    document_review_chunk_key,
+    document_review_manifest_key,
+    document_review_search_chunk_key,
+    preview_image_key,
 )
 from app.services.s3_service import (
     download_file_from_s3,
     upload_file_to_s3,
     upload_json_to_s3,
 )
-from app.services.s3_keys import (
-    document_geometry_chunk_key,
-    document_geometry_manifest_key,
-    preview_image_key,
+from justice_redact.detection.review import (
+    detect_for_review_chunk_with_document,
 )
 from justice_redact.detection.runtime import build_detection_runtime
-from justice_redact.detection.review import detect_for_review_chunk_with_document
 from justice_redact.pdf_handler.images import render_pdf_region_to_png
-import time
 
 
 PDF_PROCESSING_CHUNK_SIZE = 100
@@ -39,22 +47,19 @@ def assert_processing_active(
         )
 
 
-def _log_stage(stage: str, document_id: str, duration_s: float, **extra) -> None:
+def _log_stage(
+    stage: str,
+    document_id: str,
+    duration_s: float,
+    **extra,
+) -> None:
     """
-    Central helper so every pipeline stage logs the same shape (previously
-    each stage had its own `print(f"[TIMING] ...")` line - this replaces
-    all of them with one structured event per stage, filterable by `stage`
-    in OpenSearch).
+    Central helper so every pipeline stage logs the same shape.
 
     IMPORTANT: this function - and every logger call in this file - must
     NEVER be passed subjectName, subjectPrisonNumber, or otherPhrases via
-    **extra. This pipeline processes the most sensitive data in the whole
-    service (a person's identity and prison number); logging it into
-    OpenSearch, a separate data store with its own retention/access
-    characteristics from the primary RDS/S3 data, should be a deliberate,
-    reviewed decision - not a side-effect of adding observability. This is
-    enforced here by simply never passing those fields in, at every call
-    site below.
+    **extra. This pipeline processes highly sensitive data and logging that
+    data into OpenSearch should only ever be done deliberately.
     """
     logger.info(
         "document_processing_stage",
@@ -77,14 +82,20 @@ def get_pdf_page_count(pdf_path: Path) -> int:
         doc.close()
 
 
-def build_page_chunks(total_pages: int, chunk_size: int) -> list[dict]:
+def build_page_chunks(
+    total_pages: int,
+    chunk_size: int,
+) -> list[dict]:
     chunks = []
 
     for chunk_index, page_start in enumerate(
         range(1, total_pages + 1, chunk_size),
         start=1,
     ):
-        page_end = min(page_start + chunk_size - 1, total_pages)
+        page_end = min(
+            page_start + chunk_size - 1,
+            total_pages,
+        )
 
         chunks.append(
             {
@@ -97,6 +108,105 @@ def build_page_chunks(total_pages: int, chunk_size: int) -> list[dict]:
     return chunks
 
 
+def build_review_search_pages(
+    review_pages: list[dict],
+) -> list[dict]:
+    search_pages = []
+
+    for page in review_pages:
+        search_tables = []
+
+        for table in page.get("tables", []):
+            search_rows = []
+
+            for row in table.get("rows", []):
+                search_cells = []
+
+                for cell in row.get("cells", []):
+                    search_cells.append(
+                        {
+                            "cellId": cell["cellId"],
+                            "tableId": (cell.get("tableId") or table["tableId"]),
+                            "rowIndex": cell.get(
+                                "rowIndex",
+                                row.get("rowIndex", 0),
+                            ),
+                            "colIndex": cell.get(
+                                "colIndex",
+                                0,
+                            ),
+                            "text": cell.get(
+                                "text",
+                                "",
+                            ),
+                            "renderText": cell.get(
+                                "text",
+                                "",
+                            ),
+                            "bbox": None,
+                            "isHeader": bool(
+                                cell.get(
+                                    "isHeader",
+                                    False,
+                                )
+                            ),
+                            "isNumeric": bool(
+                                cell.get(
+                                    "isNumeric",
+                                    False,
+                                )
+                            ),
+                        }
+                    )
+
+                search_rows.append(
+                    {
+                        "rowIndex": row.get(
+                            "rowIndex",
+                            0,
+                        ),
+                        "cells": search_cells,
+                    }
+                )
+
+            search_tables.append(
+                {
+                    "tableId": table["tableId"],
+                    "bbox": None,
+                    "rows": search_rows,
+                }
+            )
+
+        search_pages.append(
+            {
+                "pageNumber": page["pageNumber"],
+                "pageId": page.get("pageId"),
+                "textItems": [
+                    {
+                        "itemId": item["itemId"],
+                        "text": item.get(
+                            "text",
+                            "",
+                        ),
+                        "renderText": item.get(
+                            "text",
+                            "",
+                        ),
+                        "bbox": None,
+                    }
+                    for item in page.get(
+                        "textItems",
+                        [],
+                    )
+                ],
+                "tables": search_tables,
+                "images": [],
+            }
+        )
+
+    return search_pages
+
+
 def process_document_pipeline(
     document_id: str,
     document_type: str,
@@ -106,23 +216,16 @@ def process_document_pipeline(
     is_processing_active=lambda: True,
 ) -> None:
     """
-    Background task (kicked off via asyncio.create_task from
-    app/api/routers/documents.py's /process endpoint) that downloads the
-    original PDF, runs detection in page chunks, renders preview images,
-    and stores the combined review result.
+    Download and process a document in page chunks, generate review data
+    and preview assets, and publish the final review result.
 
-    Logging strategy: every stage that was previously a `print(f"[TIMING]
-    ...")` line now goes through _log_stage (see docstring above for why
-    subject details are never included). Pipeline-level start/completion/
-    failure get their own dedicated events in addition to the per-stage
-    timing events, so both "how long did this take" and "did it succeed"
-    are independently queryable in OpenSearch.
+    Sensitive subject details must never be written to application logs.
     """
     pipeline_start = time.perf_counter()
+
     document = get_document(document_id)
 
     if not document:
-
         logger.warning(
             "document_processing_skipped",
             extra={
@@ -139,18 +242,21 @@ def process_document_pipeline(
     try:
         assert_processing_active(is_processing_active)
 
-        temp_pdf_path = Path("/tmp") / f"{document_id}.pdf"
-
         start = time.perf_counter()
 
         download_file_from_s3(
-            f"documents/{document_id}/original/{document['filename']}",
+            (f"documents/{document_id}/original/" f"{document['filename']}"),
             temp_pdf_path,
         )
 
-        _log_stage("download_file_from_s3", document_id, time.perf_counter() - start)
+        _log_stage(
+            "download_file_from_s3",
+            document_id,
+            time.perf_counter() - start,
+        )
 
         page_count = get_pdf_page_count(temp_pdf_path)
+
         chunks = build_page_chunks(
             total_pages=page_count,
             chunk_size=PDF_PROCESSING_CHUNK_SIZE,
@@ -175,26 +281,31 @@ def process_document_pipeline(
 
         start = time.perf_counter()
 
-        document_type = document["documentType"]
+        resolved_document_type = document["documentType"]
 
-        if document_type == "unidentified":
-            document_type = "nomis"
+        if resolved_document_type == "unidentified":
+            resolved_document_type = "nomis"
 
         detection_runtime = build_detection_runtime(
-            doc_type=document_type,
+            doc_type=resolved_document_type,
             subject_name=document["subjectName"],
             subject_prison_number=document["subjectPrisonNumber"],
             extra_allow_list=other_phrases_list,
         )
 
-        _log_stage("build_detection_runtime", document_id, time.perf_counter() - start)
+        _log_stage(
+            "build_detection_runtime",
+            document_id,
+            time.perf_counter() - start,
+        )
 
-        combined_pages = []
         combined_findings = []
         total_text_items = 0
 
-        image_preview_dir = Path("/tmp") / "processed" / document_id / "images"
-        image_preview_dir.mkdir(parents=True, exist_ok=True)
+        image_preview_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
         preview_count = 0
 
@@ -207,7 +318,10 @@ def process_document_pipeline(
 
             chunk_start = time.perf_counter()
 
-            chunk_result, chunk_document = detect_for_review_chunk_with_document(
+            (
+                chunk_result,
+                chunk_document,
+            ) = detect_for_review_chunk_with_document(
                 pdf_path=pdf_path,
                 page_start=page_start,
                 page_end=page_end,
@@ -234,7 +348,10 @@ def process_document_pipeline(
 
             upload_json_to_s3(
                 chunk_document.model_dump(),
-                document_geometry_chunk_key(document_id, chunk_index),
+                document_geometry_chunk_key(
+                    document_id,
+                    chunk_index,
+                ),
             )
 
             _log_stage(
@@ -245,21 +362,31 @@ def process_document_pipeline(
                 chunk_count=len(chunks),
             )
 
-            combined_pages.extend(chunk_result.get("pages", []))
-
-            for finding in chunk_result.get("findings", []):
-                finding["id"] = f"finding_{len(combined_findings) + 1:06d}"
+            for finding in chunk_result.get(
+                "findings",
+                [],
+            ):
+                finding["id"] = "finding_" f"{len(combined_findings) + 1:06d}"
                 combined_findings.append(finding)
 
-            total_text_items += chunk_result.get("summary", {}).get(
+            total_text_items += chunk_result.get(
+                "summary",
+                {},
+            ).get(
                 "totalTextItems",
                 0,
             )
 
             start = time.perf_counter()
 
-            for page in chunk_result.get("pages", []):
-                for image in page.get("images", []):
+            for page in chunk_result.get(
+                "pages",
+                [],
+            ):
+                for image in page.get(
+                    "images",
+                    [],
+                ):
                     bbox = image.get("bbox")
 
                     if not bbox:
@@ -296,7 +423,7 @@ def process_document_pipeline(
                     preview_count += 1
 
                     image["imageUrl"] = (
-                        f"/documents/{document_id}/images/{image['imageId']}.png"
+                        f"/documents/{document_id}" f"/images/{image['imageId']}.png"
                     )
 
             _log_stage(
@@ -307,6 +434,65 @@ def process_document_pipeline(
                 chunk_count=len(chunks),
             )
 
+            review_chunk = {
+                "chunkIndex": chunk_index,
+                "pageStart": page_start,
+                "pageEnd": page_end,
+                "pages": chunk_result.get("pages", []),
+            }
+
+            start = time.perf_counter()
+
+            upload_json_to_s3(
+                review_chunk,
+                document_review_chunk_key(
+                    document_id,
+                    chunk_index,
+                ),
+            )
+
+            _log_stage(
+                "upload_document_review_chunk",
+                document_id,
+                time.perf_counter() - start,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                page_start=page_start,
+                page_end=page_end,
+            )
+
+            search_pages = build_review_search_pages(chunk_result.get("pages", []))
+
+            search_chunk = {
+                "chunkIndex": chunk_index,
+                "pageStart": page_start,
+                "pageEnd": page_end,
+                "pages": search_pages,
+            }
+
+            start = time.perf_counter()
+
+            upload_json_to_s3(
+                search_chunk,
+                document_review_search_chunk_key(
+                    document_id,
+                    chunk_index,
+                ),
+            )
+
+            _log_stage(
+                "upload_document_review_search_chunk",
+                document_id,
+                time.perf_counter() - start,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                page_start=page_start,
+                page_end=page_end,
+            )
+
+            del review_chunk
+            del search_chunk
+            del search_pages
             del chunk_result
             del chunk_document
 
@@ -329,6 +515,19 @@ def process_document_pipeline(
             time.perf_counter() - start,
         )
 
+        start = time.perf_counter()
+
+        upload_json_to_s3(
+            manifest,
+            document_review_manifest_key(document_id),
+        )
+
+        _log_stage(
+            "upload_document_review_manifest",
+            document_id,
+            time.perf_counter() - start,
+        )
+
         result = {
             "summary": {
                 "totalPages": page_count,
@@ -336,20 +535,48 @@ def process_document_pipeline(
                 "totalFindings": len(combined_findings),
             },
             "subjectDetails": {
-                "subjectName": document["subjectName"] or "",
-                "subjectPrisonNumber": document["subjectPrisonNumber"] or "",
+                "subjectName": (document["subjectName"] or ""),
+                "subjectPrisonNumber": (document["subjectPrisonNumber"] or ""),
                 "otherPhrases": other_phrases_list,
             },
-            "pages": combined_pages,
+            "pages": [],
             "findings": combined_findings,
             "documentId": document_id,
             "filename": document["filename"],
             "status": "ready_for_review",
         }
 
-        start = time.perf_counter()
-
         assert_processing_active(is_processing_active)
+
+        # Measure only the size of the final payload.
+        # Do not log any review JSON contents because
+        # they contain sensitive SAR data.
+        review_json_bytes = len(
+            json.dumps(
+                result,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+
+        logger.info(
+            "document_processing_review_result_size",
+            extra={
+                "event": ("document_processing_" "review_result_size"),
+                "document_id": document_id,
+                "total_pages": page_count,
+                "total_findings": len(combined_findings),
+                "review_json_bytes": (review_json_bytes),
+                "review_json_mb": round(
+                    review_json_bytes / (1024 * 1024),
+                    2,
+                ),
+            },
+        )
+
+        # Start this timer immediately before the
+        # final DB publication so the timing measures
+        # only the publication transaction.
+        start = time.perf_counter()
 
         published = publish_review_result_if_processing_owner(
             document_id=document_id,
@@ -361,32 +588,65 @@ def process_document_pipeline(
 
         if not published:
             raise DocumentProcessingCancelled(
-                "Document processing lost ownership before final publication"
+                "Document processing lost ownership " "before final publication"
             )
 
-        _log_stage("upsert_review_result", document_id, time.perf_counter() - start)
+        _log_stage(
+            "upsert_review_result",
+            document_id,
+            time.perf_counter() - start,
+        )
 
         logger.info(
             "document_processing_completed",
             extra={
-                "event": "document_processing_completed",
+                "event": ("document_processing_completed"),
                 "document_id": document_id,
                 "total_pages": page_count,
-                "total_text_items": total_text_items,
+                "total_text_items": (total_text_items),
                 "total_findings": len(combined_findings),
                 "preview_count": preview_count,
-                "duration_ms": round((time.perf_counter() - pipeline_start) * 1000, 2),
+                "duration_ms": round(
+                    (time.perf_counter() - pipeline_start) * 1000,
+                    2,
+                ),
             },
         )
 
     except Exception as exc:
+        # Do not use logger.exception() here.
+        #
+        # SQLAlchemy/psycopg tracebacks may contain
+        # the SQL statement or bound parameters.
+        # The bound parameters can include review_json,
+        # which contains sensitive SAR information.
+        original_error = getattr(
+            exc,
+            "orig",
+            None,
+        )
 
         logger.error(
             "document_processing_attempt_failed",
             extra={
-                "event": "document_processing_attempt_failed",
+                "event": ("document_processing_" "attempt_failed"),
                 "document_id": document_id,
                 "error_type": type(exc).__name__,
+                "db_error_type": (
+                    type(original_error).__name__
+                    if original_error is not None
+                    else None
+                ),
+                "sqlstate": getattr(
+                    original_error,
+                    "sqlstate",
+                    None,
+                ),
+                "connection_invalidated": getattr(
+                    exc,
+                    "connection_invalidated",
+                    None,
+                ),
                 "duration_ms": round(
                     (time.perf_counter() - pipeline_start) * 1000,
                     2,
@@ -398,6 +658,7 @@ def process_document_pipeline(
 
     finally:
         temp_pdf_path.unlink(missing_ok=True)
+
         shutil.rmtree(
             image_preview_dir.parent,
             ignore_errors=True,
