@@ -33,6 +33,12 @@ from justice_redact.pdf_handler.images import render_pdf_region_to_png
 
 PDF_PROCESSING_CHUNK_SIZE = 100
 
+_CGROUP_MEMORY_CURRENT_PATH = Path("/sys/fs/cgroup/memory.current")
+_CGROUP_MEMORY_PEAK_PATH = Path("/sys/fs/cgroup/memory.peak")
+_CGROUP_MEMORY_MAX_PATH = Path("/sys/fs/cgroup/memory.max")
+_CGROUP_MEMORY_STAT_PATH = Path("/sys/fs/cgroup/memory.stat")
+_PROC_SELF_STATUS_PATH = Path("/proc/self/status")
+
 
 class DocumentProcessingCancelled(Exception):
     pass
@@ -57,9 +63,8 @@ def _log_stage(
     Central helper so every pipeline stage logs the same shape.
 
     IMPORTANT: this function - and every logger call in this file - must
-    NEVER be passed subjectName, subjectPrisonNumber, or otherPhrases via
-    **extra. This pipeline processes highly sensitive data and logging that
-    data into OpenSearch should only ever be done deliberately.
+    NEVER be passed subjectName, subjectPrisonNumber, otherPhrases, extracted
+    text, findings content, or other sensitive SAR data via **extra.
     """
     logger.info(
         "document_processing_stage",
@@ -69,6 +74,170 @@ def _log_stage(
             "document_id": document_id,
             "duration_ms": round(duration_s * 1000, 2),
             **extra,
+        },
+    )
+
+
+def _read_cgroup_memory_bytes(path: Path) -> int | None:
+    try:
+        value = path.read_text().strip()
+
+        if value == "max":
+            return None
+
+        return int(value)
+    except (OSError, ValueError):
+        return None
+
+
+def _read_cgroup_memory_stat() -> dict[str, int]:
+    """
+    Read cgroup v2 memory.stat values.
+
+    Values are bytes. If the file is unavailable or cannot be parsed,
+    return an empty dictionary so memory instrumentation never interrupts
+    document processing.
+    """
+    try:
+        stats: dict[str, int] = {}
+
+        for line in _CGROUP_MEMORY_STAT_PATH.read_text().splitlines():
+            parts = line.split(maxsplit=1)
+
+            if len(parts) != 2:
+                continue
+
+            key, value = parts
+
+            try:
+                stats[key] = int(value)
+            except ValueError:
+                continue
+
+        return stats
+    except OSError:
+        return {}
+
+
+def _read_process_memory_kb() -> dict[str, int]:
+    """
+    Read selected memory values for this worker process from /proc/self/status.
+
+    Linux reports these fields in KiB. Missing/unparseable values are ignored.
+    """
+    wanted = {
+        "VmRSS",
+        "RssAnon",
+        "RssFile",
+        "RssShmem",
+    }
+
+    try:
+        values: dict[str, int] = {}
+
+        for line in _PROC_SELF_STATUS_PATH.read_text().splitlines():
+            key, separator, remainder = line.partition(":")
+
+            if not separator or key not in wanted:
+                continue
+
+            parts = remainder.strip().split()
+
+            if not parts:
+                continue
+
+            try:
+                values[key] = int(parts[0])
+            except ValueError:
+                continue
+
+        return values
+    except OSError:
+        return {}
+
+
+def _bytes_to_mb(value: int | None) -> float | None:
+    if value is None:
+        return None
+
+    return round(value / (1024 * 1024), 2)
+
+
+def _kb_to_mb(value: int | None) -> float | None:
+    if value is None:
+        return None
+
+    return round(value / 1024, 2)
+
+
+def _log_memory_snapshot(
+    *,
+    point: str,
+    document_id: str,
+    chunk_index: int,
+    chunk_count: int,
+    combined_findings_count: int,
+    analyser_cache_size: int,
+    postprocessor_cache_size: int,
+) -> None:
+    """
+    Log non-sensitive worker/container memory diagnostics.
+
+    cgroup values reflect the memory accounting Kubernetes uses when enforcing
+    the worker memory limit. /proc/self/status values help distinguish process
+    RSS from file-backed/container-level memory.
+
+    This helper must never receive document text, findings content, subject
+    details, or any other SAR data.
+    """
+    current_bytes = _read_cgroup_memory_bytes(
+        _CGROUP_MEMORY_CURRENT_PATH,
+    )
+    peak_bytes = _read_cgroup_memory_bytes(
+        _CGROUP_MEMORY_PEAK_PATH,
+    )
+    limit_bytes = _read_cgroup_memory_bytes(
+        _CGROUP_MEMORY_MAX_PATH,
+    )
+
+    memory_stat = _read_cgroup_memory_stat()
+    process_memory = _read_process_memory_kb()
+
+    logger.info(
+        "document_processing_memory",
+        extra={
+            "event": "document_processing_memory",
+            "point": point,
+            "document_id": document_id,
+            "chunk_index": chunk_index,
+            "chunk_count": chunk_count,
+            "memory_current_mb": _bytes_to_mb(current_bytes),
+            "memory_peak_mb": _bytes_to_mb(peak_bytes),
+            "memory_limit_mb": _bytes_to_mb(limit_bytes),
+            "memory_anon_mb": _bytes_to_mb(
+                memory_stat.get("anon"),
+            ),
+            "memory_file_mb": _bytes_to_mb(
+                memory_stat.get("file"),
+            ),
+            "memory_kernel_mb": _bytes_to_mb(
+                memory_stat.get("kernel"),
+            ),
+            "process_rss_mb": _kb_to_mb(
+                process_memory.get("VmRSS"),
+            ),
+            "process_rss_anon_mb": _kb_to_mb(
+                process_memory.get("RssAnon"),
+            ),
+            "process_rss_file_mb": _kb_to_mb(
+                process_memory.get("RssFile"),
+            ),
+            "process_rss_shmem_mb": _kb_to_mb(
+                process_memory.get("RssShmem"),
+            ),
+            "combined_findings_count": combined_findings_count,
+            "analyser_cache_size": analyser_cache_size,
+            "postprocessor_cache_size": postprocessor_cache_size,
         },
     )
 
@@ -318,6 +487,16 @@ def process_document_pipeline(
 
             chunk_start = time.perf_counter()
 
+            _log_memory_snapshot(
+                point="before_chunk",
+                document_id=document_id,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                combined_findings_count=len(combined_findings),
+                analyser_cache_size=len(detection_runtime.analyser_cache),
+                postprocessor_cache_size=len(detection_runtime.postprocessor_cache),
+            )
+
             (
                 chunk_result,
                 chunk_document,
@@ -330,6 +509,16 @@ def process_document_pipeline(
                 subject_prison_number=document["subjectPrisonNumber"],
                 other_phrases=other_phrases_list,
                 runtime=detection_runtime,
+            )
+
+            _log_memory_snapshot(
+                point="after_detection",
+                document_id=document_id,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                combined_findings_count=len(combined_findings),
+                analyser_cache_size=len(detection_runtime.analyser_cache),
+                postprocessor_cache_size=len(detection_runtime.postprocessor_cache),
             )
 
             assert_processing_active(is_processing_active)
@@ -360,6 +549,16 @@ def process_document_pipeline(
                 time.perf_counter() - start,
                 chunk_index=chunk_index,
                 chunk_count=len(chunks),
+            )
+
+            _log_memory_snapshot(
+                point="after_geometry_upload",
+                document_id=document_id,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                combined_findings_count=len(combined_findings),
+                analyser_cache_size=len(detection_runtime.analyser_cache),
+                postprocessor_cache_size=len(detection_runtime.postprocessor_cache),
             )
 
             for finding in chunk_result.get(
@@ -438,7 +637,10 @@ def process_document_pipeline(
                 "chunkIndex": chunk_index,
                 "pageStart": page_start,
                 "pageEnd": page_end,
-                "pages": chunk_result.get("pages", []),
+                "pages": chunk_result.get(
+                    "pages",
+                    [],
+                ),
             }
 
             start = time.perf_counter()
@@ -461,7 +663,12 @@ def process_document_pipeline(
                 page_end=page_end,
             )
 
-            search_pages = build_review_search_pages(chunk_result.get("pages", []))
+            search_pages = build_review_search_pages(
+                chunk_result.get(
+                    "pages",
+                    [],
+                )
+            )
 
             search_chunk = {
                 "chunkIndex": chunk_index,
@@ -490,11 +697,31 @@ def process_document_pipeline(
                 page_end=page_end,
             )
 
+            _log_memory_snapshot(
+                point="before_cleanup",
+                document_id=document_id,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                combined_findings_count=len(combined_findings),
+                analyser_cache_size=len(detection_runtime.analyser_cache),
+                postprocessor_cache_size=len(detection_runtime.postprocessor_cache),
+            )
+
             del review_chunk
             del search_chunk
             del search_pages
             del chunk_result
             del chunk_document
+
+            _log_memory_snapshot(
+                point="after_cleanup",
+                document_id=document_id,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
+                combined_findings_count=len(combined_findings),
+                analyser_cache_size=len(detection_runtime.analyser_cache),
+                postprocessor_cache_size=len(detection_runtime.postprocessor_cache),
+            )
 
         manifest = {
             "chunkSize": PDF_PROCESSING_CHUNK_SIZE,
@@ -548,9 +775,6 @@ def process_document_pipeline(
 
         assert_processing_active(is_processing_active)
 
-        # Measure only the size of the final payload.
-        # Do not log any review JSON contents because
-        # they contain sensitive SAR data.
         review_json_bytes = len(
             json.dumps(
                 result,
@@ -565,7 +789,7 @@ def process_document_pipeline(
                 "document_id": document_id,
                 "total_pages": page_count,
                 "total_findings": len(combined_findings),
-                "review_json_bytes": (review_json_bytes),
+                "review_json_bytes": review_json_bytes,
                 "review_json_mb": round(
                     review_json_bytes / (1024 * 1024),
                     2,
@@ -573,9 +797,6 @@ def process_document_pipeline(
             },
         )
 
-        # Start this timer immediately before the
-        # final DB publication so the timing measures
-        # only the publication transaction.
         start = time.perf_counter()
 
         published = publish_review_result_if_processing_owner(
@@ -600,10 +821,10 @@ def process_document_pipeline(
         logger.info(
             "document_processing_completed",
             extra={
-                "event": ("document_processing_completed"),
+                "event": "document_processing_completed",
                 "document_id": document_id,
                 "total_pages": page_count,
-                "total_text_items": (total_text_items),
+                "total_text_items": total_text_items,
                 "total_findings": len(combined_findings),
                 "preview_count": preview_count,
                 "duration_ms": round(
@@ -614,12 +835,7 @@ def process_document_pipeline(
         )
 
     except Exception as exc:
-        # Do not use logger.exception() here.
-        #
-        # SQLAlchemy/psycopg tracebacks may contain
-        # the SQL statement or bound parameters.
-        # The bound parameters can include review_json,
-        # which contains sensitive SAR information.
+
         original_error = getattr(
             exc,
             "orig",
@@ -657,7 +873,9 @@ def process_document_pipeline(
         raise
 
     finally:
-        temp_pdf_path.unlink(missing_ok=True)
+        temp_pdf_path.unlink(
+            missing_ok=True,
+        )
 
         shutil.rmtree(
             image_preview_dir.parent,
