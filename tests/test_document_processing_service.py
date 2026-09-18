@@ -157,3 +157,197 @@ def test_build_review_search_pages_preserves_table_cell_identity_and_text():
             "images": [],
         }
     ]
+
+
+def test_log_memory_snapshot_reads_cgroup_and_process_memory(
+    tmp_path,
+    monkeypatch,
+):
+    memory_current = tmp_path / "memory.current"
+    memory_peak = tmp_path / "memory.peak"
+    memory_max = tmp_path / "memory.max"
+    memory_stat = tmp_path / "memory.stat"
+    process_status = tmp_path / "status"
+
+    memory_current.write_text(str(512 * 1024 * 1024))
+    memory_peak.write_text(str(768 * 1024 * 1024))
+    memory_max.write_text(str(2 * 1024 * 1024 * 1024))
+
+    memory_stat.write_text(
+        "\n".join(
+            [
+                f"anon {400 * 1024 * 1024}",
+                f"file {90 * 1024 * 1024}",
+                f"kernel {20 * 1024 * 1024}",
+            ]
+        )
+    )
+
+    process_status.write_text(
+        "\n".join(
+            [
+                "Name:\tpython",
+                "VmRSS:\t307200 kB",
+                "RssAnon:\t266240 kB",
+                "RssFile:\t40960 kB",
+                "RssShmem:\t0 kB",
+            ]
+        )
+    )
+
+    monkeypatch.setattr(
+        document_processing_service,
+        "_CGROUP_MEMORY_CURRENT_PATH",
+        memory_current,
+    )
+    monkeypatch.setattr(
+        document_processing_service,
+        "_CGROUP_MEMORY_PEAK_PATH",
+        memory_peak,
+    )
+    monkeypatch.setattr(
+        document_processing_service,
+        "_CGROUP_MEMORY_MAX_PATH",
+        memory_max,
+    )
+    monkeypatch.setattr(
+        document_processing_service,
+        "_CGROUP_MEMORY_STAT_PATH",
+        memory_stat,
+    )
+    monkeypatch.setattr(
+        document_processing_service,
+        "_PROC_SELF_STATUS_PATH",
+        process_status,
+    )
+
+    log_calls = []
+
+    def fake_logger_info(message, *, extra):
+        log_calls.append(
+            {
+                "message": message,
+                "extra": extra,
+            }
+        )
+
+    monkeypatch.setattr(
+        document_processing_service.logger,
+        "info",
+        fake_logger_info,
+    )
+
+    document_processing_service._log_memory_snapshot(
+        point="after_detection",
+        document_id="document-123",
+        chunk_index=4,
+        chunk_count=78,
+        combined_findings_count=25,
+        analyser_cache_size=2,
+        postprocessor_cache_size=3,
+    )
+
+    assert len(log_calls) == 1
+
+    logged = log_calls[0]
+
+    assert logged["message"] == "document_processing_memory"
+
+    extra = logged["extra"]
+
+    assert extra["event"] == "document_processing_memory"
+    assert extra["point"] == "after_detection"
+    assert extra["document_id"] == "document-123"
+    assert extra["chunk_index"] == 4
+    assert extra["chunk_count"] == 78
+
+    assert extra["memory_current_mb"] == 512.0
+    assert extra["memory_peak_mb"] == 768.0
+    assert extra["memory_limit_mb"] == 2048.0
+
+    assert extra["memory_anon_mb"] == 400.0
+    assert extra["memory_file_mb"] == 90.0
+    assert extra["memory_kernel_mb"] == 20.0
+
+    assert extra["process_rss_mb"] == 300.0
+    assert extra["process_rss_anon_mb"] == 260.0
+    assert extra["process_rss_file_mb"] == 40.0
+    assert extra["process_rss_shmem_mb"] == 0.0
+
+    assert extra["combined_findings_count"] == 25
+    assert extra["analyser_cache_size"] == 2
+    assert extra["postprocessor_cache_size"] == 3
+
+
+def test_memory_snapshot_handles_unavailable_memory_files(
+    tmp_path,
+    monkeypatch,
+):
+    missing_path = tmp_path / "does-not-exist"
+
+    monkeypatch.setattr(
+        document_processing_service,
+        "_CGROUP_MEMORY_CURRENT_PATH",
+        missing_path,
+    )
+    monkeypatch.setattr(
+        document_processing_service,
+        "_CGROUP_MEMORY_PEAK_PATH",
+        missing_path,
+    )
+    monkeypatch.setattr(
+        document_processing_service,
+        "_CGROUP_MEMORY_MAX_PATH",
+        missing_path,
+    )
+    monkeypatch.setattr(
+        document_processing_service,
+        "_CGROUP_MEMORY_STAT_PATH",
+        missing_path,
+    )
+    monkeypatch.setattr(
+        document_processing_service,
+        "_PROC_SELF_STATUS_PATH",
+        missing_path,
+    )
+
+    log_calls = []
+
+    def fake_logger_info(message, *, extra):
+        log_calls.append(
+            {
+                "message": message,
+                "extra": extra,
+            }
+        )
+
+    monkeypatch.setattr(
+        document_processing_service.logger,
+        "info",
+        fake_logger_info,
+    )
+
+    document_processing_service._log_memory_snapshot(
+        point="before_chunk",
+        document_id="document-123",
+        chunk_index=1,
+        chunk_count=78,
+        combined_findings_count=0,
+        analyser_cache_size=0,
+        postprocessor_cache_size=0,
+    )
+
+    assert len(log_calls) == 1
+
+    extra = log_calls[0]["extra"]
+
+    assert extra["memory_current_mb"] is None
+    assert extra["memory_peak_mb"] is None
+    assert extra["memory_limit_mb"] is None
+    assert extra["memory_anon_mb"] is None
+    assert extra["memory_file_mb"] is None
+    assert extra["memory_kernel_mb"] is None
+    assert extra["process_rss_mb"] is None
+    assert extra["process_rss_anon_mb"] is None
+    assert extra["process_rss_file_mb"] is None
+    assert extra["process_rss_shmem_mb"] is None
