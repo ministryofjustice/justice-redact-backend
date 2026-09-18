@@ -28,7 +28,7 @@ system-certs = true
 package = false
 
 [tool.uv.sources]
-justice-redact = { git = "https://github.com/moj-analytical-services/justice-redact.git", rev = "a2974c13233abbce9aa3565d3edc73dff0a2f52e" }
+justice-redact = { git = "https://github.com/moj-analytical-services/justice-redact.git", rev = "839cd259a5220b1240ce13825adf285e5cdea6f0" }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
