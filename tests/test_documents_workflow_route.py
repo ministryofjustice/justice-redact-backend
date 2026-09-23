@@ -195,3 +195,30 @@ async def test_abandon_document_still_succeeds_when_s3_cleanup_fails(
         "preferredPage": "upload",
         "allowedPages": ["upload"],
     }
+
+
+@pytest.mark.anyio
+async def test_get_document_status_returns_processing_progress(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        documents,
+        "get_document_or_404",
+        lambda document_id: {
+            "documentId": document_id,
+            "filename": "test.pdf",
+            "status": "processing",
+            "processingProgress": 57,
+        },
+    )
+
+    response = await documents.get_document_status(
+        "document-123",
+    )
+
+    assert response == {
+        "documentId": "document-123",
+        "filename": "test.pdf",
+        "status": "processing",
+        "processingProgress": 57,
+    }
