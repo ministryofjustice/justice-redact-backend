@@ -312,6 +312,112 @@ async def test_apply_redactions_returns_409_when_run_is_superseded_during_enqueu
 
 
 @pytest.mark.anyio
+async def test_get_redaction_run_status_returns_progress(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        redactions,
+        "get_document_or_404",
+        lambda document_id: {
+            "documentId": document_id,
+        },
+    )
+
+    monkeypatch.setattr(
+        redactions,
+        "get_redaction_run",
+        lambda run_id: {
+            "documentId": "document-123",
+            "runId": run_id,
+            "status": "processing",
+            "processingProgress": 67,
+        },
+    )
+
+    response = await redactions.get_redaction_run_status(
+        document_id="document-123",
+        run_id="run-123",
+    )
+
+    assert response == {
+        "documentId": "document-123",
+        "runId": "run-123",
+        "status": "processing",
+        "processingProgress": 67,
+    }
+
+
+@pytest.mark.anyio
+async def test_get_redaction_run_status_returns_superseded_run_state(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        redactions,
+        "get_document_or_404",
+        lambda document_id: {
+            "documentId": document_id,
+            "currentRedactionRunId": "run-new",
+        },
+    )
+
+    monkeypatch.setattr(
+        redactions,
+        "get_redaction_run",
+        lambda run_id: {
+            "documentId": "document-123",
+            "runId": run_id,
+            "status": "cancelled",
+            "processingProgress": 58,
+        },
+    )
+
+    response = await redactions.get_redaction_run_status(
+        document_id="document-123",
+        run_id="run-old",
+    )
+
+    assert response == {
+        "documentId": "document-123",
+        "runId": "run-old",
+        "status": "cancelled",
+        "processingProgress": 58,
+    }
+
+
+@pytest.mark.anyio
+async def test_get_redaction_run_status_returns_404_for_wrong_document(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        redactions,
+        "get_document_or_404",
+        lambda document_id: {
+            "documentId": document_id,
+        },
+    )
+
+    monkeypatch.setattr(
+        redactions,
+        "get_redaction_run",
+        lambda run_id: {
+            "documentId": "different-document",
+            "runId": run_id,
+            "status": "processing",
+            "processingProgress": 40,
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await redactions.get_redaction_run_status(
+            document_id="document-123",
+            run_id="run-123",
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Redaction run not found"
+
+
+@pytest.mark.anyio
 async def test_cancel_redactions_cancels_current_run(
     monkeypatch,
 ):

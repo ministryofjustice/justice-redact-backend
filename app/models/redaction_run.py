@@ -30,6 +30,12 @@ class RedactionRun(Base):
         nullable=False,
     )
 
+    processing_progress = Column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
     decisions_snapshot = Column(
         JSONB,
         nullable=False,

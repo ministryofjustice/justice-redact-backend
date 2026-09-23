@@ -1,3 +1,5 @@
+import pytest
+
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -136,6 +138,7 @@ def test_get_redaction_run_returns_run_state(
         document_id="document-123",
         review_revision=4,
         status="queued",
+        processing_progress=0,
         decisions_snapshot={
             "documentId": "document-123",
             "decisions": [{"id": "decision-1"}],
@@ -164,6 +167,7 @@ def test_get_redaction_run_returns_run_state(
         "documentId": "document-123",
         "reviewRevision": 4,
         "status": "queued",
+        "processingProgress": 0,
         "decisionsSnapshot": {
             "documentId": "document-123",
             "decisions": [{"id": "decision-1"}],
@@ -246,6 +250,7 @@ def test_create_redaction_run_uses_persisted_revision_and_snapshot(
     assert created_run.document_id == "document-123"
     assert created_run.review_revision == 4
     assert created_run.status == "enqueueing"
+    assert created_run.processing_progress == 0
     assert created_run.decisions_snapshot == {
         "documentId": "document-123",
         "decisions": [{"id": "decision-1"}],
@@ -361,6 +366,262 @@ def test_claim_redaction_run_moves_current_run_to_processing(
     assert session.committed is True
 
 
+def test_update_redaction_run_processing_progress_advances_for_current_owner(
+    monkeypatch,
+):
+    document = SimpleNamespace(
+        document_id="document-123",
+        current_redaction_run_id="run-123",
+        status="applying_redactions",
+    )
+
+    redaction_run = SimpleNamespace(
+        run_id="run-123",
+        document_id="document-123",
+        status="processing",
+        claim_id="claim-123",
+        processing_progress=20,
+    )
+
+    session = FakeRunTransitionSession(
+        document=document,
+        redaction_run=redaction_run,
+    )
+
+    monkeypatch.setattr(
+        redaction_run_store,
+        "SessionLocal",
+        lambda: session,
+    )
+
+    result = redaction_run_store.update_redaction_run_processing_progress(
+        run_id="run-123",
+        claim_id="claim-123",
+        progress=40,
+    )
+
+    assert result is True
+    assert redaction_run.processing_progress == 40
+    assert session.committed is True
+
+
+def test_update_redaction_run_processing_progress_does_not_go_backwards(
+    monkeypatch,
+):
+    document = SimpleNamespace(
+        document_id="document-123",
+        current_redaction_run_id="run-123",
+        status="applying_redactions",
+    )
+
+    redaction_run = SimpleNamespace(
+        run_id="run-123",
+        document_id="document-123",
+        status="processing",
+        claim_id="claim-123",
+        processing_progress=60,
+    )
+
+    session = FakeRunTransitionSession(
+        document=document,
+        redaction_run=redaction_run,
+    )
+
+    monkeypatch.setattr(
+        redaction_run_store,
+        "SessionLocal",
+        lambda: session,
+    )
+
+    result = redaction_run_store.update_redaction_run_processing_progress(
+        run_id="run-123",
+        claim_id="claim-123",
+        progress=25,
+    )
+
+    assert result is True
+    assert redaction_run.processing_progress == 60
+    assert session.committed is True
+
+
+def test_update_redaction_run_processing_progress_allows_same_high_water_mark(
+    monkeypatch,
+):
+    document = SimpleNamespace(
+        document_id="document-123",
+        current_redaction_run_id="run-123",
+        status="applying_redactions",
+    )
+
+    redaction_run = SimpleNamespace(
+        run_id="run-123",
+        document_id="document-123",
+        status="processing",
+        claim_id="claim-123",
+        processing_progress=60,
+    )
+
+    session = FakeRunTransitionSession(
+        document=document,
+        redaction_run=redaction_run,
+    )
+
+    monkeypatch.setattr(
+        redaction_run_store,
+        "SessionLocal",
+        lambda: session,
+    )
+
+    result = redaction_run_store.update_redaction_run_processing_progress(
+        run_id="run-123",
+        claim_id="claim-123",
+        progress=60,
+    )
+
+    assert result is True
+    assert redaction_run.processing_progress == 60
+    assert session.committed is True
+
+
+def test_update_redaction_run_processing_progress_rejects_wrong_claim(
+    monkeypatch,
+):
+    document = SimpleNamespace(
+        document_id="document-123",
+        current_redaction_run_id="run-123",
+        status="applying_redactions",
+    )
+
+    redaction_run = SimpleNamespace(
+        run_id="run-123",
+        document_id="document-123",
+        status="processing",
+        claim_id="claim-current",
+        processing_progress=25,
+    )
+
+    session = FakeRunTransitionSession(
+        document=document,
+        redaction_run=redaction_run,
+    )
+
+    monkeypatch.setattr(
+        redaction_run_store,
+        "SessionLocal",
+        lambda: session,
+    )
+
+    result = redaction_run_store.update_redaction_run_processing_progress(
+        run_id="run-123",
+        claim_id="claim-stale",
+        progress=50,
+    )
+
+    assert result is False
+    assert redaction_run.processing_progress == 25
+    assert session.committed is False
+
+
+def test_update_redaction_run_processing_progress_rejects_superseded_run(
+    monkeypatch,
+):
+    document = SimpleNamespace(
+        document_id="document-123",
+        current_redaction_run_id="run-new",
+        status="applying_redactions",
+    )
+
+    redaction_run = SimpleNamespace(
+        run_id="run-old",
+        document_id="document-123",
+        status="processing",
+        claim_id="claim-old",
+        processing_progress=25,
+    )
+
+    session = FakeRunTransitionSession(
+        document=document,
+        redaction_run=redaction_run,
+    )
+
+    monkeypatch.setattr(
+        redaction_run_store,
+        "SessionLocal",
+        lambda: session,
+    )
+
+    result = redaction_run_store.update_redaction_run_processing_progress(
+        run_id="run-old",
+        claim_id="claim-old",
+        progress=50,
+    )
+
+    assert result is False
+    assert redaction_run.processing_progress == 25
+    assert session.committed is False
+
+
+def test_update_redaction_run_processing_progress_allows_99(
+    monkeypatch,
+):
+    document = SimpleNamespace(
+        document_id="document-123",
+        current_redaction_run_id="run-123",
+        status="applying_redactions",
+    )
+
+    redaction_run = SimpleNamespace(
+        run_id="run-123",
+        document_id="document-123",
+        status="processing",
+        claim_id="claim-123",
+        processing_progress=90,
+    )
+
+    session = FakeRunTransitionSession(
+        document=document,
+        redaction_run=redaction_run,
+    )
+
+    monkeypatch.setattr(
+        redaction_run_store,
+        "SessionLocal",
+        lambda: session,
+    )
+
+    result = redaction_run_store.update_redaction_run_processing_progress(
+        run_id="run-123",
+        claim_id="claim-123",
+        progress=99,
+    )
+
+    assert result is True
+    assert redaction_run.processing_progress == 99
+    assert session.committed is True
+
+
+@pytest.mark.parametrize(
+    "progress",
+    [
+        -1,
+        100,
+        101,
+    ],
+)
+def test_update_redaction_run_processing_progress_rejects_out_of_range(
+    progress,
+):
+    with pytest.raises(
+        ValueError,
+        match="Processing progress must be between 0 and 99",
+    ):
+        redaction_run_store.update_redaction_run_processing_progress(
+            run_id="run-123",
+            claim_id="claim-123",
+            progress=progress,
+        )
+
+
 def test_complete_redaction_run_marks_run_and_document_completed(
     monkeypatch,
 ):
@@ -376,6 +637,7 @@ def test_complete_redaction_run_marks_run_and_document_completed(
         run_id="run-123",
         document_id="document-123",
         status="processing",
+        processing_progress=99,
         claim_id="claim-123",
         lease_expires_at=datetime.now(timezone.utc),
         page_counts=None,
@@ -408,6 +670,7 @@ def test_complete_redaction_run_marks_run_and_document_completed(
     assert result is True
 
     assert redaction_run.status == "completed"
+    assert redaction_run.processing_progress == 100
     assert redaction_run.page_counts == {
         "original": 10,
         "redacted": 8,
@@ -441,6 +704,7 @@ def test_fail_redaction_run_marks_retryable_attempt_for_retry(
         run_id="run-123",
         document_id="document-123",
         status="processing",
+        processing_progress=62,
         claim_id="claim-123",
         lease_expires_at=datetime.now(timezone.utc),
         completed_at=None,
@@ -468,6 +732,7 @@ def test_fail_redaction_run_marks_retryable_attempt_for_retry(
     assert result is True
 
     assert redaction_run.status == "retrying"
+    assert redaction_run.processing_progress == 62
     assert redaction_run.error_message == "PDF generation failed"
     assert redaction_run.completed_at is None
     assert redaction_run.claim_id is None
