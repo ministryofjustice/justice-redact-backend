@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0008_redaction_run_processing_progress"
+revision = "0008_redaction_run_progress"
 down_revision: str | None = "0007_processing_progress"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
