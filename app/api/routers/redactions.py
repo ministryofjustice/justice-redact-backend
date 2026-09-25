@@ -12,6 +12,7 @@ from app.services.redaction_run_store import (
     cancel_redaction_run,
     create_redaction_run,
     fail_redaction_run_enqueue,
+    get_redaction_run,
     mark_redaction_run_queued,
 )
 from app.services.document_store import get_document_or_404
@@ -188,6 +189,29 @@ async def apply_redactions(
         "documentId": document_id,
         "runId": run_id,
         "status": "queued",
+    }
+
+
+@router.get("/{document_id}/redaction-runs/{run_id}/status")
+async def get_redaction_run_status(
+    document_id: str,
+    run_id: str,
+):
+    get_document_or_404(document_id)
+
+    redaction_run = get_redaction_run(run_id)
+
+    if redaction_run is None or redaction_run["documentId"] != document_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Redaction run not found",
+        )
+
+    return {
+        "documentId": document_id,
+        "runId": run_id,
+        "status": redaction_run["status"],
+        "processingProgress": redaction_run["processingProgress"],
     }
 
 

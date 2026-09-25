@@ -1,3 +1,5 @@
+from collections.abc import Callable
+from fractions import Fraction
 from pathlib import Path
 import time
 
@@ -44,6 +46,45 @@ from app.services.s3_service import (
 
 class RedactionProcessingCancelled(Exception):
     pass
+
+
+REDACTION_PROGRESS_STARTED = 1
+REDACTION_PROGRESS_SETUP_COMPLETE = 5
+REDACTION_PROGRESS_RESOLUTION_COMPLETE = 25
+REDACTION_PROGRESS_REDACTED_PAGE_WORK_COMPLETE = 54
+REDACTION_PROGRESS_REDACTED_COMPLETE = 55
+REDACTION_PROGRESS_VETTED_PAGE_WORK_COMPLETE = 79
+REDACTION_PROGRESS_VETTED_COMPLETE = 80
+REDACTION_PROGRESS_EXEMPT_PAGE_WORK_COMPLETE = 89
+REDACTION_PROGRESS_EXEMPT_COMPLETE = 90
+REDACTION_PROGRESS_UPLOADS_COMPLETE = 98
+REDACTION_PROGRESS_READY_TO_COMPLETE = 99
+
+
+def calculate_redaction_stage_progress(
+    *,
+    start_progress: int,
+    end_progress: int,
+    completed: int,
+    total: int,
+) -> int:
+    if start_progress < 0 or end_progress > 99 or end_progress < start_progress:
+        raise ValueError("Invalid redaction progress range")
+
+    if total <= 0:
+        raise ValueError("Progress total must be greater than 0")
+
+    if completed < 0 or completed > total:
+        raise ValueError("Progress completed must be between 0 and total")
+
+    progress_span = end_progress - start_progress
+
+    progress = start_progress + int(progress_span * Fraction(completed, total))
+
+    return min(
+        progress,
+        end_progress,
+    )
 
 
 def assert_redaction_processing_active(
@@ -271,11 +312,41 @@ def apply_redactions_for_document(
     run_id: str,
     request: ApplyRedactionsRequest,
     is_redaction_active=lambda: True,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> dict:
     pipeline_start = time.perf_counter()
 
+    def report_progress(
+        progress: int,
+    ) -> None:
+        if progress_callback is not None:
+            progress_callback(progress)
+
+    def report_stage_progress(
+        *,
+        start_progress: int,
+        end_progress: int,
+        completed: int,
+        total: int,
+    ) -> None:
+        if progress_callback is None:
+            return
+
+        progress_callback(
+            calculate_redaction_stage_progress(
+                start_progress=start_progress,
+                end_progress=end_progress,
+                completed=completed,
+                total=total,
+            )
+        )
+
     assert_redaction_processing_active(
         is_redaction_active,
+    )
+
+    report_progress(
+        REDACTION_PROGRESS_STARTED,
     )
 
     start = time.perf_counter()
@@ -390,10 +461,22 @@ def apply_redactions_for_document(
         typed_decisions=all_pdf_decisions,
     )
 
+    report_progress(
+        REDACTION_PROGRESS_SETUP_COMPLETE,
+    )
+
+    sorted_decision_chunks = sorted(decisions_by_chunk.items())
+
     resolved_decisions = []
     resolved_ai_suggestions = []
 
-    for chunk_index, chunk_decisions in sorted(decisions_by_chunk.items()):
+    for completed_chunks, (
+        chunk_index,
+        chunk_decisions,
+    ) in enumerate(
+        sorted_decision_chunks,
+        start=1,
+    ):
         assert_redaction_processing_active(
             is_redaction_active,
         )
@@ -444,6 +527,18 @@ def apply_redactions_for_document(
         del chunk_geometry
         del chunk_document
         del chunk_resolved_decisions
+
+        report_stage_progress(
+            start_progress=REDACTION_PROGRESS_SETUP_COMPLETE,
+            end_progress=REDACTION_PROGRESS_RESOLUTION_COMPLETE,
+            completed=completed_chunks,
+            total=len(sorted_decision_chunks),
+        )
+
+    if not sorted_decision_chunks:
+        report_progress(
+            REDACTION_PROGRESS_RESOLUTION_COMPLETE,
+        )
 
     unresolved_decision_count = len(typed_decisions) - len(resolved_decisions)
 
@@ -553,10 +648,22 @@ def apply_redactions_for_document(
         resolved_decisions=resolved_decisions,
         output_path=redacted_output_path,
         excluded_page_numbers=(redacted_excluded_page_numbers),
+        progress_callback=lambda completed, total: (
+            report_stage_progress(
+                start_progress=(REDACTION_PROGRESS_RESOLUTION_COMPLETE),
+                end_progress=(REDACTION_PROGRESS_REDACTED_PAGE_WORK_COMPLETE),
+                completed=completed,
+                total=total,
+            )
+        ),
     )
 
     assert_redaction_processing_active(
         is_redaction_active,
+    )
+
+    report_progress(
+        REDACTION_PROGRESS_REDACTED_COMPLETE,
     )
 
     print(
@@ -585,10 +692,22 @@ def apply_redactions_for_document(
         resolved_ai_suggestions=(resolved_ai_suggestions),
         output_path=vetted_output_path,
         excluded_page_numbers=(vetted_excluded_page_numbers),
+        progress_callback=lambda completed, total: (
+            report_stage_progress(
+                start_progress=(REDACTION_PROGRESS_REDACTED_COMPLETE),
+                end_progress=(REDACTION_PROGRESS_VETTED_PAGE_WORK_COMPLETE),
+                completed=completed,
+                total=total,
+            )
+        ),
     )
 
     assert_redaction_processing_active(
         is_redaction_active,
+    )
+
+    report_progress(
+        REDACTION_PROGRESS_VETTED_COMPLETE,
     )
 
     print(
@@ -615,10 +734,22 @@ def apply_redactions_for_document(
             output_path=exempt_output_path,
             exempt_page_numbers=(exempt_page_numbers),
             resolved_ai_suggestions=(resolved_ai_suggestions),
+            progress_callback=lambda completed, total: (
+                report_stage_progress(
+                    start_progress=(REDACTION_PROGRESS_VETTED_COMPLETE),
+                    end_progress=(REDACTION_PROGRESS_EXEMPT_PAGE_WORK_COMPLETE),
+                    completed=completed,
+                    total=total,
+                )
+            ),
         )
 
         assert_redaction_processing_active(
             is_redaction_active,
+        )
+
+        report_progress(
+            REDACTION_PROGRESS_EXEMPT_COMPLETE,
         )
 
         print(
@@ -628,7 +759,15 @@ def apply_redactions_for_document(
             flush=True,
         )
 
+    else:
+        report_progress(
+            REDACTION_PROGRESS_EXEMPT_COMPLETE,
+        )
+
     # UPLOAD EXPORTS
+
+    upload_count = 3 if exempt_page_numbers else 2
+    completed_uploads = 0
 
     start = time.perf_counter()
 
@@ -642,6 +781,15 @@ def apply_redactions_for_document(
             document_id,
             run_id,
         ),
+    )
+
+    completed_uploads += 1
+
+    report_stage_progress(
+        start_progress=REDACTION_PROGRESS_EXEMPT_COMPLETE,
+        end_progress=REDACTION_PROGRESS_UPLOADS_COMPLETE,
+        completed=completed_uploads,
+        total=upload_count,
     )
 
     print(
@@ -663,6 +811,15 @@ def apply_redactions_for_document(
             document_id,
             run_id,
         ),
+    )
+
+    completed_uploads += 1
+
+    report_stage_progress(
+        start_progress=REDACTION_PROGRESS_EXEMPT_COMPLETE,
+        end_progress=REDACTION_PROGRESS_UPLOADS_COMPLETE,
+        completed=completed_uploads,
+        total=upload_count,
     )
 
     print(
@@ -687,6 +844,15 @@ def apply_redactions_for_document(
             ),
         )
 
+        completed_uploads += 1
+
+        report_stage_progress(
+            start_progress=REDACTION_PROGRESS_EXEMPT_COMPLETE,
+            end_progress=REDACTION_PROGRESS_UPLOADS_COMPLETE,
+            completed=completed_uploads,
+            total=upload_count,
+        )
+
         print(
             f"[REDACTION_TIMING] "
             f"upload_exempt_pdf="
@@ -703,6 +869,10 @@ def apply_redactions_for_document(
 
     assert_redaction_processing_active(
         is_redaction_active,
+    )
+
+    report_progress(
+        REDACTION_PROGRESS_READY_TO_COMPLETE,
     )
 
     return {

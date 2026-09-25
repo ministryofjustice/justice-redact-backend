@@ -351,3 +351,239 @@ def test_memory_snapshot_handles_unavailable_memory_files(
     assert extra["process_rss_anon_mb"] is None
     assert extra["process_rss_file_mb"] is None
     assert extra["process_rss_shmem_mb"] is None
+
+
+def test_calculate_chunk_processing_progress_maps_single_chunk_stages():
+    calculate = document_processing_service.calculate_chunk_processing_progress
+
+    assert (
+        calculate(
+            total_pages=100,
+            page_start=1,
+            page_end=100,
+            stage="extraction",
+            completed=100,
+            total=100,
+        )
+        == 33
+    )
+
+    assert (
+        calculate(
+            total_pages=100,
+            page_start=1,
+            page_end=100,
+            stage="detection",
+            completed=1,
+            total=1,
+        )
+        == 65
+    )
+
+    assert (
+        calculate(
+            total_pages=100,
+            page_start=1,
+            page_end=100,
+            stage="persistence",
+            completed=1,
+            total=4,
+        )
+        == 73
+    )
+
+    assert (
+        calculate(
+            total_pages=100,
+            page_start=1,
+            page_end=100,
+            stage="persistence",
+            completed=2,
+            total=4,
+        )
+        == 81
+    )
+
+    assert (
+        calculate(
+            total_pages=100,
+            page_start=1,
+            page_end=100,
+            stage="persistence",
+            completed=3,
+            total=4,
+        )
+        == 89
+    )
+
+    assert (
+        calculate(
+            total_pages=100,
+            page_start=1,
+            page_end=100,
+            stage="persistence",
+            completed=4,
+            total=4,
+        )
+        == 98
+    )
+
+
+def test_calculate_chunk_processing_progress_weights_chunks_by_page_count():
+    calculate = document_processing_service.calculate_chunk_processing_progress
+
+    assert (
+        calculate(
+            total_pages=150,
+            page_start=1,
+            page_end=100,
+            stage="persistence",
+            completed=4,
+            total=4,
+        )
+        == 65
+    )
+
+    assert (
+        calculate(
+            total_pages=150,
+            page_start=101,
+            page_end=150,
+            stage="extraction",
+            completed=50,
+            total=50,
+        )
+        == 76
+    )
+
+    assert (
+        calculate(
+            total_pages=150,
+            page_start=101,
+            page_end=150,
+            stage="persistence",
+            completed=4,
+            total=4,
+        )
+        == 98
+    )
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "unknown",
+        "",
+    ],
+)
+def test_calculate_chunk_processing_progress_rejects_unknown_stage(
+    stage,
+):
+    with pytest.raises(
+        ValueError,
+        match="Unknown processing progress stage",
+    ):
+        document_processing_service.calculate_chunk_processing_progress(
+            total_pages=100,
+            page_start=1,
+            page_end=100,
+            stage=stage,
+            completed=1,
+            total=1,
+        )
+
+
+def test_processing_progress_reporter_only_persists_forward_progress(
+    monkeypatch,
+):
+    updates = []
+
+    def fake_update_document_processing_progress(**kwargs):
+        updates.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        document_processing_service,
+        "update_document_processing_progress",
+        fake_update_document_processing_progress,
+    )
+
+    reporter = document_processing_service.DocumentProcessingProgressReporter(
+        document_id="document-123",
+        job_id="job-123",
+        claim_id="claim-123",
+        initial_progress=40,
+    )
+
+    reporter.report(40)
+    reporter.report(35)
+    reporter.report(41)
+    reporter.report(41)
+    reporter.report(45)
+
+    assert updates == [
+        {
+            "document_id": "document-123",
+            "job_id": "job-123",
+            "claim_id": "claim-123",
+            "progress": 41,
+        },
+        {
+            "document_id": "document-123",
+            "job_id": "job-123",
+            "claim_id": "claim-123",
+            "progress": 45,
+        },
+    ]
+
+    assert reporter.last_persisted_progress == 45
+
+
+def test_processing_progress_reporter_cancels_when_ownership_is_lost(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        document_processing_service,
+        "update_document_processing_progress",
+        lambda **kwargs: False,
+    )
+
+    reporter = document_processing_service.DocumentProcessingProgressReporter(
+        document_id="document-123",
+        job_id="job-123",
+        claim_id="claim-123",
+        initial_progress=20,
+    )
+
+    with pytest.raises(
+        document_processing_service.DocumentProcessingCancelled,
+        match="lost ownership",
+    ):
+        reporter.report(21)
+
+    assert reporter.last_persisted_progress == 20
+
+
+@pytest.mark.parametrize(
+    "progress",
+    [
+        -1,
+        100,
+    ],
+)
+def test_processing_progress_reporter_rejects_invalid_progress(
+    monkeypatch,
+    progress,
+):
+    reporter = document_processing_service.DocumentProcessingProgressReporter(
+        document_id="document-123",
+        job_id="job-123",
+        claim_id="claim-123",
+        initial_progress=0,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Processing progress must be between 0 and 99",
+    ):
+        reporter.report(progress)

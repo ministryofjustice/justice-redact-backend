@@ -15,12 +15,122 @@ class FakeThread:
         pass
 
 
+def test_redaction_processing_progress_reporter_only_persists_forward_progress(
+    monkeypatch,
+):
+    updates = []
+
+    monkeypatch.setattr(
+        worker,
+        "update_redaction_run_processing_progress",
+        lambda **kwargs: updates.append(kwargs) or True,
+    )
+
+    reporter = worker.RedactionProcessingProgressReporter(
+        run_id="run-123",
+        claim_id="claim-123",
+        initial_progress=25,
+    )
+
+    reporter.report(25)
+    reporter.report(20)
+    reporter.report(40)
+    reporter.report(40)
+    reporter.report(55)
+
+    assert updates == [
+        {
+            "run_id": "run-123",
+            "claim_id": "claim-123",
+            "progress": 40,
+        },
+        {
+            "run_id": "run-123",
+            "claim_id": "claim-123",
+            "progress": 55,
+        },
+    ]
+
+    assert reporter.last_persisted_progress == 55
+
+
+def test_redaction_processing_progress_reporter_cancels_when_ownership_is_lost(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        worker,
+        "update_redaction_run_processing_progress",
+        lambda **kwargs: False,
+    )
+
+    reporter = worker.RedactionProcessingProgressReporter(
+        run_id="run-123",
+        claim_id="claim-123",
+        initial_progress=20,
+    )
+
+    with pytest.raises(
+        worker.RedactionProcessingCancelled,
+        match="lost ownership while updating progress",
+    ):
+        reporter.report(30)
+
+    assert reporter.last_persisted_progress == 20
+
+
+@pytest.mark.parametrize(
+    "progress",
+    [
+        -1,
+        100,
+        101,
+    ],
+)
+def test_redaction_processing_progress_reporter_rejects_invalid_progress(
+    progress,
+):
+    reporter = worker.RedactionProcessingProgressReporter(
+        run_id="run-123",
+        claim_id="claim-123",
+        initial_progress=0,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Processing progress must be between 0 and 99",
+    ):
+        reporter.report(progress)
+
+
+@pytest.mark.parametrize(
+    "initial_progress",
+    [
+        -1,
+        100,
+        101,
+    ],
+)
+def test_redaction_processing_progress_reporter_rejects_invalid_initial_progress(
+    initial_progress,
+):
+    with pytest.raises(
+        ValueError,
+        match="Initial processing progress must be between 0 and 99",
+    ):
+        worker.RedactionProcessingProgressReporter(
+            run_id="run-123",
+            claim_id="claim-123",
+            initial_progress=initial_progress,
+        )
+
+
 def _run_state():
     return {
         "runId": "run-123",
         "documentId": "document-123",
         "reviewRevision": 4,
         "status": "queued",
+        "processingProgress": 0,
         "decisionsSnapshot": {
             "documentId": "document-123",
             "decisions": [
@@ -95,6 +205,14 @@ def test_redaction_worker_processes_snapshot_and_completes_run(
         FakeThread,
     )
 
+    progress_updates = []
+
+    monkeypatch.setattr(
+        worker,
+        "update_redaction_run_processing_progress",
+        lambda **kwargs: progress_updates.append(kwargs) or True,
+    )
+
     def apply_redactions(**kwargs):
         assert kwargs["document_id"] == "document-123"
         assert kwargs["run_id"] == "run-123"
@@ -107,6 +225,11 @@ def test_redaction_worker_processes_snapshot_and_completes_run(
         assert request.decisions[0].kind == "image"
 
         assert kwargs["is_redaction_active"]() is True
+
+        progress_callback = kwargs["progress_callback"]
+
+        progress_callback(37)
+        progress_callback(58)
 
         return {
             "pageCounts": {
@@ -166,6 +289,16 @@ def test_redaction_worker_processes_snapshot_and_completes_run(
         "exempt": 1,
         "deleted": 1,
     }
+
+    assert len(progress_updates) == 2
+
+    assert progress_updates[0]["run_id"] == "run-123"
+    assert progress_updates[0]["claim_id"] == claim_calls[0]["claim_id"]
+    assert progress_updates[0]["progress"] == 37
+
+    assert progress_updates[1]["run_id"] == "run-123"
+    assert progress_updates[1]["claim_id"] == claim_calls[0]["claim_id"]
+    assert progress_updates[1]["progress"] == 58
 
     assert deleted_messages == ["receipt-123"]
     assert failed_runs == []

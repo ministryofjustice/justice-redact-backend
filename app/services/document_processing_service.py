@@ -1,13 +1,16 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from fractions import Fraction
 import shutil
 import time
-
 import pymupdf
 
 from app.logging_config import logger
-from app.services.document_store import get_document
+from app.services.document_store import (
+    get_document,
+    update_document_processing_progress,
+)
 from app.services.review_result_store import (
     publish_review_result_if_processing_owner,
 )
@@ -32,6 +35,8 @@ from justice_redact.pdf_handler.images import render_pdf_region_to_png
 
 
 PDF_PROCESSING_CHUNK_SIZE = 100
+PROCESSING_PROGRESS_SETUP_COMPLETE = 1
+PROCESSING_PROGRESS_CHUNKS_COMPLETE = 98
 
 _CGROUP_MEMORY_CURRENT_PATH = Path("/sys/fs/cgroup/memory.current")
 _CGROUP_MEMORY_PEAK_PATH = Path("/sys/fs/cgroup/memory.peak")
@@ -42,6 +47,48 @@ _PROC_SELF_STATUS_PATH = Path("/proc/self/status")
 
 class DocumentProcessingCancelled(Exception):
     pass
+
+
+class DocumentProcessingProgressReporter:
+    def __init__(
+        self,
+        *,
+        document_id: str,
+        job_id: str,
+        claim_id: str,
+        initial_progress: int,
+    ) -> None:
+        if initial_progress < 0 or initial_progress > 99:
+            raise ValueError("Initial processing progress must be between 0 and 99")
+
+        self.document_id = document_id
+        self.job_id = job_id
+        self.claim_id = claim_id
+        self.last_persisted_progress = initial_progress
+
+    def report(
+        self,
+        progress: int,
+    ) -> None:
+        if progress < 0 or progress > 99:
+            raise ValueError("Processing progress must be between 0 and 99")
+
+        if progress <= self.last_persisted_progress:
+            return
+
+        updated = update_document_processing_progress(
+            document_id=self.document_id,
+            job_id=self.job_id,
+            claim_id=self.claim_id,
+            progress=progress,
+        )
+
+        if not updated:
+            raise DocumentProcessingCancelled(
+                "Document processing lost ownership " "while updating progress"
+            )
+
+        self.last_persisted_progress = progress
 
 
 def assert_processing_active(
@@ -277,6 +324,59 @@ def build_page_chunks(
     return chunks
 
 
+def calculate_chunk_processing_progress(
+    *,
+    total_pages: int,
+    page_start: int,
+    page_end: int,
+    stage: str,
+    completed: int,
+    total: int,
+) -> int:
+    if total_pages <= 0:
+        raise ValueError("total_pages must be greater than 0")
+
+    if page_start < 1 or page_end < page_start or page_end > total_pages:
+        raise ValueError("Invalid chunk page range")
+
+    if total <= 0:
+        raise ValueError("Progress total must be greater than 0")
+
+    if completed < 0 or completed > total:
+        raise ValueError("Progress completed must be between 0 and total")
+
+    stage_progress = Fraction(completed, total)
+
+    if stage == "extraction":
+        chunk_progress = stage_progress / 3
+    elif stage == "detection":
+        chunk_progress = Fraction(1, 3) + (stage_progress / 3)
+    elif stage == "persistence":
+        chunk_progress = Fraction(2, 3) + (stage_progress / 3)
+    else:
+        raise ValueError(f"Unknown processing progress stage: {stage}")
+
+    completed_pages_before_chunk = page_start - 1
+    chunk_page_count = page_end - page_start + 1
+
+    document_work_progress = (
+        Fraction(completed_pages_before_chunk, 1) + (chunk_page_count * chunk_progress)
+    ) / total_pages
+
+    progress_span = (
+        PROCESSING_PROGRESS_CHUNKS_COMPLETE - PROCESSING_PROGRESS_SETUP_COMPLETE
+    )
+
+    progress = PROCESSING_PROGRESS_SETUP_COMPLETE + int(
+        progress_span * document_work_progress
+    )
+
+    return min(
+        progress,
+        PROCESSING_PROGRESS_CHUNKS_COMPLETE,
+    )
+
+
 def build_review_search_pages(
     review_pages: list[dict],
 ) -> list[dict]:
@@ -405,6 +505,13 @@ def process_document_pipeline(
         )
         return
 
+    progress_reporter = DocumentProcessingProgressReporter(
+        document_id=document_id,
+        job_id=job_id,
+        claim_id=claim_id,
+        initial_progress=document["processingProgress"],
+    )
+
     temp_pdf_path = Path("/tmp") / f"{document_id}.pdf"
     image_preview_dir = Path("/tmp") / "processed" / document_id / "images"
 
@@ -468,6 +575,10 @@ def process_document_pipeline(
             time.perf_counter() - start,
         )
 
+        progress_reporter.report(
+            PROCESSING_PROGRESS_SETUP_COMPLETE,
+        )
+
         combined_findings = []
         total_text_items = 0
 
@@ -486,6 +597,22 @@ def process_document_pipeline(
             page_end = chunk["pageEnd"]
 
             chunk_start = time.perf_counter()
+
+            def report_chunk_progress(
+                stage: str,
+                completed: int,
+                total: int,
+            ) -> None:
+                progress = calculate_chunk_processing_progress(
+                    total_pages=page_count,
+                    page_start=page_start,
+                    page_end=page_end,
+                    stage=stage,
+                    completed=completed,
+                    total=total,
+                )
+
+                progress_reporter.report(progress)
 
             _log_memory_snapshot(
                 point="before_chunk",
@@ -509,6 +636,7 @@ def process_document_pipeline(
                 subject_prison_number=document["subjectPrisonNumber"],
                 other_phrases=other_phrases_list,
                 runtime=detection_runtime,
+                progress_callback=report_chunk_progress,
             )
 
             _log_memory_snapshot(
@@ -549,6 +677,12 @@ def process_document_pipeline(
                 time.perf_counter() - start,
                 chunk_index=chunk_index,
                 chunk_count=len(chunks),
+            )
+
+            report_chunk_progress(
+                "persistence",
+                1,
+                4,
             )
 
             _log_memory_snapshot(
@@ -633,6 +767,12 @@ def process_document_pipeline(
                 chunk_count=len(chunks),
             )
 
+            report_chunk_progress(
+                "persistence",
+                2,
+                4,
+            )
+
             review_chunk = {
                 "chunkIndex": chunk_index,
                 "pageStart": page_start,
@@ -661,6 +801,12 @@ def process_document_pipeline(
                 chunk_count=len(chunks),
                 page_start=page_start,
                 page_end=page_end,
+            )
+
+            report_chunk_progress(
+                "persistence",
+                3,
+                4,
             )
 
             search_pages = build_review_search_pages(
@@ -695,6 +841,12 @@ def process_document_pipeline(
                 chunk_count=len(chunks),
                 page_start=page_start,
                 page_end=page_end,
+            )
+
+            report_chunk_progress(
+                "persistence",
+                4,
+                4,
             )
 
             _log_memory_snapshot(
@@ -774,6 +926,8 @@ def process_document_pipeline(
         }
 
         assert_processing_active(is_processing_active)
+
+        progress_reporter.report(99)
 
         review_json_bytes = len(
             json.dumps(

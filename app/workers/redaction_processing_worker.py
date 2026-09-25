@@ -14,6 +14,7 @@ from app.services.redaction_run_store import (
     get_redaction_run,
     is_redaction_run_owner,
     renew_redaction_run_lease,
+    update_redaction_run_processing_progress,
 )
 from app.services.redaction_service import (
     RedactionProcessingCancelled,
@@ -38,6 +39,45 @@ class RedactionProcessingMessage:
 PROCESSING_LEASE_SECONDS = 900
 HEARTBEAT_INTERVAL_SECONDS = 300
 MAX_RECEIVE_COUNT = 3
+
+
+class RedactionProcessingProgressReporter:
+    def __init__(
+        self,
+        *,
+        run_id: str,
+        claim_id: str,
+        initial_progress: int,
+    ) -> None:
+        if initial_progress < 0 or initial_progress > 99:
+            raise ValueError("Initial processing progress must be between 0 and 99")
+
+        self.run_id = run_id
+        self.claim_id = claim_id
+        self.last_persisted_progress = initial_progress
+
+    def report(
+        self,
+        progress: int,
+    ) -> None:
+        if progress < 0 or progress > 99:
+            raise ValueError("Processing progress must be between 0 and 99")
+
+        if progress <= self.last_persisted_progress:
+            return
+
+        updated = update_redaction_run_processing_progress(
+            run_id=self.run_id,
+            claim_id=self.claim_id,
+            progress=progress,
+        )
+
+        if not updated:
+            raise RedactionProcessingCancelled(
+                "Redaction processing lost ownership while updating progress"
+            )
+
+        self.last_persisted_progress = progress
 
 
 def run_processing_heartbeat(
@@ -283,6 +323,12 @@ def process_sqs_message(message: dict) -> None:
         if claimed_run is None:
             raise RedactionProcessingCancelled("Redaction run disappeared after claim")
 
+        progress_reporter = RedactionProcessingProgressReporter(
+            run_id=parsed.run_id,
+            claim_id=claim_id,
+            initial_progress=claimed_run["processingProgress"],
+        )
+
         snapshot = claimed_run["decisionsSnapshot"]
 
         if not isinstance(snapshot, dict):
@@ -308,6 +354,7 @@ def process_sqs_message(message: dict) -> None:
                     claim_id=claim_id,
                 )
             ),
+            progress_callback=progress_reporter.report,
         )
 
         completed = complete_redaction_run(
