@@ -46,6 +46,7 @@ def test_publish_review_result_if_processing_owner_publishes_for_current_owner(
         status="processing",
         processing_job_id="job-123",
         processing_claim_id="claim-123",
+        processing_progress=99,
         processing_completed_at=None,
         processing_lease_expires_at=None,
         error_message=None,
@@ -75,6 +76,7 @@ def test_publish_review_result_if_processing_owner_publishes_for_current_owner(
     assert session.added[0].review_json == {"documentId": "document-123"}
     assert session.committed is True
     assert document.status == "ready_for_review"
+    assert document.processing_progress == 100
 
     assert document.processing_completed_at == completed_at
     assert document.processing_claim_id is None

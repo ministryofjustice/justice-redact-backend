@@ -21,6 +21,11 @@ class Document(Base):
         nullable=True,
     )
     processing_job_id = Column(String, nullable=True)
+    processing_progress = Column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
     processing_attempt_count = Column(
         Integer,
         nullable=False,

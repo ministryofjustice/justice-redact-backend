@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 from datetime import datetime, timezone
-from sqlalchemy import and_, or_, update
+from sqlalchemy import and_, case, or_, update
 
 from app.core.database import SessionLocal
 from app.models.document import Document
@@ -23,6 +23,7 @@ def document_to_dict(document: Document) -> dict:
             document.abandoned_at.isoformat() if document.abandoned_at else None
         ),
         "processingJobId": document.processing_job_id,
+        "processingProgress": document.processing_progress,
         "processingAttemptCount": document.processing_attempt_count,
         "processingClaimId": document.processing_claim_id,
         "processingLeaseExpiresAt": (
@@ -275,13 +276,16 @@ def renew_document_processing_lease(
         return result.rowcount == 1
 
 
-def complete_document_processing(
+def update_document_processing_progress(
     *,
     document_id: str,
     job_id: str,
     claim_id: str,
-    completed_at: datetime,
+    progress: int,
 ) -> bool:
+    if progress < 0 or progress > 99:
+        raise ValueError("Processing progress must be between 0 and 99")
+
     with SessionLocal() as session:
         result = session.execute(
             update(Document)
@@ -292,11 +296,13 @@ def complete_document_processing(
                 Document.status == "processing",
             )
             .values(
-                status="ready_for_review",
-                processing_completed_at=completed_at,
-                processing_claim_id=None,
-                processing_lease_expires_at=None,
-                error_message=None,
+                processing_progress=case(
+                    (
+                        Document.processing_progress < progress,
+                        progress,
+                    ),
+                    else_=Document.processing_progress,
+                ),
             )
         )
 
@@ -383,6 +389,7 @@ def try_start_document_processing_enqueue(
             .values(
                 status="enqueueing",
                 processing_job_id=job_id,
+                processing_progress=0,
                 processing_attempt_count=0,
                 processing_claim_id=None,
                 processing_lease_expires_at=None,

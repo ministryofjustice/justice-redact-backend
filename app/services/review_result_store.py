@@ -59,6 +59,7 @@ def publish_review_result_if_processing_owner(
             review_result.review_json = review_json
 
         document.status = "ready_for_review"
+        document.processing_progress = 100
         document.processing_completed_at = completed_at
         document.processing_claim_id = None
         document.processing_lease_expires_at = None

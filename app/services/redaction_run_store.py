@@ -15,6 +15,7 @@ def redaction_run_to_dict(redaction_run: RedactionRun) -> dict:
         "documentId": redaction_run.document_id,
         "reviewRevision": redaction_run.review_revision,
         "status": redaction_run.status,
+        "processingProgress": redaction_run.processing_progress,
         "decisionsSnapshot": redaction_run.decisions_snapshot,
         "attemptCount": redaction_run.attempt_count,
         "claimId": redaction_run.claim_id,
@@ -123,6 +124,7 @@ def create_redaction_run(
             document_id=document_id,
             review_revision=redaction_decision.revision,
             status="enqueueing",
+            processing_progress=0,
             decisions_snapshot=deepcopy(redaction_decision.decisions_json),
             attempt_count=0,
             claim_id=None,
@@ -472,6 +474,53 @@ def renew_redaction_run_lease(
         return True
 
 
+def update_redaction_run_processing_progress(
+    *,
+    run_id: str,
+    claim_id: str,
+    progress: int,
+) -> bool:
+    if progress < 0 or progress > 99:
+        raise ValueError("Processing progress must be between 0 and 99")
+
+    with SessionLocal() as session:
+        existing_run = session.get(
+            RedactionRun,
+            run_id,
+        )
+
+        if existing_run is None:
+            return False
+
+        document = session.execute(
+            select(Document)
+            .where(Document.document_id == existing_run.document_id)
+            .with_for_update()
+        ).scalar_one_or_none()
+
+        redaction_run = session.execute(
+            select(RedactionRun).where(RedactionRun.run_id == run_id).with_for_update()
+        ).scalar_one_or_none()
+
+        if document is None or redaction_run is None:
+            return False
+
+        if (
+            document.status != "applying_redactions"
+            or document.current_redaction_run_id != run_id
+            or redaction_run.status != "processing"
+            or redaction_run.claim_id != claim_id
+        ):
+            return False
+
+        if progress > redaction_run.processing_progress:
+            redaction_run.processing_progress = progress
+
+        session.commit()
+
+        return True
+
+
 def complete_redaction_run(
     *,
     run_id: str,
@@ -513,6 +562,7 @@ def complete_redaction_run(
             return False
 
         redaction_run.status = "completed"
+        redaction_run.processing_progress = 100
         redaction_run.page_counts = deepcopy(page_counts)
         redaction_run.completed_at = now
         redaction_run.claim_id = None
