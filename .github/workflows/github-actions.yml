@@ -110,6 +110,13 @@ jobs:
           envsubst < deployments/templates/redaction-worker-hpa.yml > k8s/app/redaction-worker-hpa.yml
           
           envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
+
+          # Analytical Platform data extractor — dev only until the
+          # analytical-platform-reporting-s3-bucket secret exists in staging/prod
+          if [ "${ENVIRONMENT}" = "dev" ]; then
+            envsubst < deployments/templates/data-extractor-job.yml > k8s/app/data-extractor-job.yml
+          fi
+          
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: justice-redact/justice-redact-${{ needs.set-environment.outputs.target_env }}
