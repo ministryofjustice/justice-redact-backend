@@ -8,6 +8,17 @@ class Document(Base):
     __tablename__ = "documents"
 
     document_id = Column(String, primary_key=True)
+
+    owner_user_id = Column(
+        String,
+        ForeignKey(
+            "users.user_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        index=True,
+    )
+
     filename = Column(String, nullable=False)
     status = Column(String, nullable=False)
     document_type = Column(String, nullable=False, default="unidentified")

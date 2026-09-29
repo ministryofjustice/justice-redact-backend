@@ -1,12 +1,14 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.logging_config import logger
-from app.services.document_store import get_document_or_404
+from app.services.document_store import get_document_for_user_or_404
 from app.services.review_data_service import (
     get_review_pages,
     get_review_search_pages,
 )
 from app.services.review_result_store import get_review_result
+from app.api.dependencies.auth import get_current_user
+from app.services.auth_service import AuthenticatedUser
 
 
 router = APIRouter(prefix="/documents", tags=["review"])
@@ -15,8 +17,14 @@ MAX_REVIEW_PAGE_RANGE = 50
 
 
 @router.get("/{document_id}/review")
-async def get_document_review(document_id: str):
-    get_document_or_404(document_id)
+async def get_document_review(
+    document_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     review_result = get_review_result(document_id)
 
@@ -49,8 +57,12 @@ async def get_document_review_pages(
         alias="pageEnd",
         ge=1,
     ),
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    get_document_or_404(document_id)
+    get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     if page_end < page_start:
         raise HTTPException(
@@ -86,8 +98,12 @@ async def get_document_review_pages(
 @router.get("/{document_id}/review/search")
 async def get_document_review_search(
     document_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    get_document_or_404(document_id)
+    get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     pages = get_review_search_pages(
         document_id=document_id,

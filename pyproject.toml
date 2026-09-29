@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.14.1",
     "python-json-logger>=2.0.7", # Added for Opensearch logging
     "boto3==1.43.6",
+    "notifications-python-client>=12.2.0",
 ]
 
 [dependency-groups]

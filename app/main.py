@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.logging_config import configure_logging, logger
 from app.api.routers.documents import router as documents_router
 from app.api.routers.exports import router as exports_router
+from app.api.routers.auth import router as auth_router
 from app.api.routers.redactions import router as redactions_router
 from app.api.routers.review import router as review_router
 from app.api.routers.health import router as health_router
@@ -63,13 +64,12 @@ async def log_requests(request: Request, call_next):
             "client_ip": request.client.host if request.client else None,
         },
     )
-    # Echoed back to the client too, so it can be correlated with the
-    # OpenSearch log entry from the frontend / support tickets if needed.
     response.headers["X-Request-ID"] = request_id
     return response
 
 
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(review_router)
 app.include_router(redactions_router)
