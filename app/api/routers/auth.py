@@ -21,6 +21,8 @@ from app.services.auth_service import (
     AuthenticatedUser,
     create_verification_challenge,
     verify_email_token,
+    ConfirmationLinkDidNotWorkError,
+    ConfirmationTokenNotRecognisedError,
 )
 from app.services.notify_service import send_verification_email
 
@@ -126,12 +128,17 @@ async def verify_email(
         alias=settings.auth_verification_cookie_name,
     ),
 ):
-    verified_session = verify_email_token(
-        request.token,
-        browser_token,
-    )
-
-    if verified_session is None:
+    try:
+        verified_session = verify_email_token(
+            request.token,
+            browser_token,
+        )
+    except ConfirmationLinkDidNotWorkError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The confirmation link did not work",
+        )
+    except ConfirmationTokenNotRecognisedError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=("The confirmation link was not recognised"),

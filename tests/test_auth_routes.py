@@ -158,13 +158,19 @@ async def test_verify_sets_session_cookie(
 
 
 @pytest.mark.anyio
-async def test_verify_rejects_invalid_challenge(
+async def test_verify_returns_not_recognised_for_unknown_token(
     monkeypatch,
 ):
+    def reject_token(
+        email_token,
+        browser_token,
+    ):
+        raise (auth.ConfirmationTokenNotRecognisedError)
+
     monkeypatch.setattr(
         auth,
         "verify_email_token",
-        lambda email_token, browser_token: (None),
+        reject_token,
     )
 
     from fastapi import HTTPException
@@ -178,6 +184,37 @@ async def test_verify_rejects_invalid_challenge(
         )
 
     assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "The confirmation link was not recognised"
+
+
+@pytest.mark.anyio
+async def test_verify_returns_did_not_work_for_browser_failure(
+    monkeypatch,
+):
+    def reject_link(
+        email_token,
+        browser_token,
+    ):
+        raise (auth.ConfirmationLinkDidNotWorkError)
+
+    monkeypatch.setattr(
+        auth,
+        "verify_email_token",
+        reject_link,
+    )
+
+    from fastapi import HTTPException
+    from fastapi import Response
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth.verify_email(
+            auth.VerifyEmailRequest(token="email-secret"),
+            Response(),
+            browser_token=None,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "The confirmation link did not work"
 
 
 @pytest.mark.anyio

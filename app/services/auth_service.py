@@ -23,6 +23,14 @@ class AccessNotEnabledError(Exception):
     pass
 
 
+class ConfirmationLinkDidNotWorkError(Exception):
+    pass
+
+
+class ConfirmationTokenNotRecognisedError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class AuthenticatedUser:
     user_id: str
@@ -137,22 +145,22 @@ def verify_email_token(
     browser_token: str | None,
     *,
     now: datetime | None = None,
-) -> VerifiedSession | None:
+) -> VerifiedSession:
     if not browser_token:
-        return None
+        raise ConfirmationLinkDidNotWorkError
 
     raw_email_token = email_token.strip()
 
     if not raw_email_token:
-        return None
+        raise ConfirmationLinkDidNotWorkError
 
     current_time = now or _utc_now()
 
     raw_session_token = secrets.token_urlsafe(48)
 
-    session_expires_at = current_time + timedelta(days=(settings.auth_session_ttl_days))
+    session_expires_at = current_time + timedelta(days=settings.auth_session_ttl_days)
 
-    user = consume_verification_and_create_session(
+    result = consume_verification_and_create_session(
         verification_token_hash=(_hash_secret(raw_email_token)),
         browser_token_hash=(_hash_secret(browser_token)),
         session_token_hash=(_hash_secret(raw_session_token)),
@@ -160,16 +168,19 @@ def verify_email_token(
         now=current_time,
     )
 
-    if user is None:
-        return None
+    if result == "token_not_recognised":
+        raise ConfirmationTokenNotRecognisedError
+
+    if result == "link_did_not_work":
+        raise ConfirmationLinkDidNotWorkError
 
     return VerifiedSession(
         user=AuthenticatedUser(
-            user_id=user["userId"],
-            email=user["email"],
+            user_id=result["userId"],
+            email=result["email"],
         ),
         token=raw_session_token,
-        expires_at=(session_expires_at),
+        expires_at=session_expires_at,
     )
 
 

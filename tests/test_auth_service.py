@@ -215,9 +215,40 @@ def test_verified_session_lasts_seven_days(
 
 
 def test_verify_email_token_requires_browser_token():
-    result = auth_service.verify_email_token(
-        "raw-email-token",
-        None,
+    with pytest.raises(auth_service.ConfirmationLinkDidNotWorkError):
+        auth_service.verify_email_token(
+            "raw-email-token",
+            None,
+        )
+
+
+def test_verify_email_token_rejects_unrecognised_token(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        auth_service,
+        "consume_verification_and_create_session",
+        lambda **kwargs: "token_not_recognised",
     )
 
-    assert result is None
+    with pytest.raises(auth_service.ConfirmationTokenNotRecognisedError):
+        auth_service.verify_email_token(
+            "unknown-email-token",
+            "browser-token",
+        )
+
+
+def test_verify_email_token_rejects_unusable_link(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        auth_service,
+        "consume_verification_and_create_session",
+        lambda **kwargs: "link_did_not_work",
+    )
+
+    with pytest.raises(auth_service.ConfirmationLinkDidNotWorkError):
+        auth_service.verify_email_token(
+            "email-token",
+            "wrong-browser-token",
+        )
