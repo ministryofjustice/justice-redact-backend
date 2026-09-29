@@ -132,7 +132,36 @@ spec:
                   name: rds-postgresql-instance-output
                   key: database_password
 
-            # Allow the backend to assume the Analytical Platform Comprehend role.
+            - name: NOTIFY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ${NAMESPACE}-notify
+                  key: api_key
+
+            - name: NOTIFY_VERIFICATION_TEMPLATE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ${NAMESPACE}-notify
+                  key: verification_template_id
+
+            - name: AUTH_FRONTEND_BASE_URL
+              value: "https://${NAMESPACE}.apps.live.cloud-platform.service.justice.gov.uk"
+
+            - name: AUTH_COOKIE_SECURE
+              value: "true"
+
+            - name: AUTH_COOKIE_SAMESITE
+              value: "lax"
+
+            - name: AUTH_SESSION_TTL_DAYS
+              value: "7"
+
+            - name: AUTH_VERIFICATION_TOKEN_TTL_MINUTES
+              value: "30"
+
+            - name: AUTH_ALLOWED_EMAIL_DOMAINS
+              value: "justice.gov.uk"
+
             - name: AP_COMPREHEND_ROLE_ARN
               value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
 

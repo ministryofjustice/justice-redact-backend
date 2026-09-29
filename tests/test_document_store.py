@@ -360,3 +360,220 @@ def test_update_document_processing_progress_rejects_out_of_range(
             claim_id="claim-123",
             progress=progress,
         )
+
+
+class OwnershipTestBase(DeclarativeBase):
+    pass
+
+
+class OwnershipTestDocument(OwnershipTestBase):
+    __tablename__ = "owned_documents"
+
+    document_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+    )
+
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    filename: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    document_type: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    warning_reason: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    subject_name: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="",
+    )
+
+    subject_prison_number: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="",
+    )
+
+    other_phrases: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="",
+    )
+
+
+def install_ownership_test_store(
+    monkeypatch,
+):
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+    )
+
+    OwnershipTestBase.metadata.create_all(engine)
+
+    test_session_local = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+    )
+
+    monkeypatch.setattr(
+        document_store,
+        "Document",
+        OwnershipTestDocument,
+    )
+
+    monkeypatch.setattr(
+        document_store,
+        "SessionLocal",
+        test_session_local,
+    )
+
+    monkeypatch.setattr(
+        document_store,
+        "document_to_dict",
+        lambda document: {
+            "documentId": document.document_id,
+            "filename": document.filename,
+        },
+    )
+
+    return test_session_local
+
+
+def test_create_document_record_assigns_owner(
+    monkeypatch,
+):
+    test_session_local = install_ownership_test_store(monkeypatch)
+
+    result = document_store.create_document_record(
+        document_id="document-123",
+        owner_user_id="user-123",
+        filename="example.pdf",
+        document_type="nomis",
+    )
+
+    assert result == {
+        "documentId": "document-123",
+        "filename": "example.pdf",
+    }
+
+    with test_session_local() as session:
+        document = session.get(
+            OwnershipTestDocument,
+            "document-123",
+        )
+
+        assert document is not None
+
+        assert document.owner_user_id == "user-123"
+
+
+def test_get_document_for_user_returns_owned_document(
+    monkeypatch,
+):
+    test_session_local = install_ownership_test_store(monkeypatch)
+
+    with test_session_local() as session:
+        session.add(
+            OwnershipTestDocument(
+                document_id="document-123",
+                owner_user_id="user-123",
+                filename="example.pdf",
+                status="uploaded",
+                document_type="nomis",
+                subject_name="",
+                subject_prison_number="",
+                other_phrases="",
+            )
+        )
+
+        session.commit()
+
+    result = document_store.get_document_for_user_or_404(
+        "document-123",
+        "user-123",
+    )
+
+    assert result["documentId"] == ("document-123")
+
+
+def test_get_document_for_user_returns_404_for_other_user(
+    monkeypatch,
+):
+    test_session_local = install_ownership_test_store(monkeypatch)
+
+    with test_session_local() as session:
+        session.add(
+            OwnershipTestDocument(
+                document_id="document-123",
+                owner_user_id="user-a",
+                filename="example.pdf",
+                status="uploaded",
+                document_type="nomis",
+                subject_name="",
+                subject_prison_number="",
+                other_phrases="",
+            )
+        )
+
+        session.commit()
+
+    with pytest.raises(document_store.HTTPException) as exc_info:
+        (
+            document_store.get_document_for_user_or_404(
+                "document-123",
+                "user-b",
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Document not found"
+
+
+def test_get_document_for_user_returns_404_for_unowned_legacy_document(
+    monkeypatch,
+):
+    test_session_local = install_ownership_test_store(monkeypatch)
+
+    with test_session_local() as session:
+        session.add(
+            OwnershipTestDocument(
+                document_id="legacy-document",
+                owner_user_id=None,
+                filename="legacy.pdf",
+                status="uploaded",
+                document_type="nomis",
+                subject_name="",
+                subject_prison_number="",
+                other_phrases="",
+            )
+        )
+
+        session.commit()
+
+    with pytest.raises(document_store.HTTPException) as exc_info:
+        (
+            document_store.get_document_for_user_or_404(
+                "legacy-document",
+                "user-123",
+            )
+        )
+
+    assert exc_info.value.status_code == 404

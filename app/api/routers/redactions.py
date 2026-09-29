@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.logging_config import logger
 from app.services.sqs_service import send_redaction_processing_message
@@ -15,18 +15,26 @@ from app.services.redaction_run_store import (
     get_redaction_run,
     mark_redaction_run_queued,
 )
-from app.services.document_store import get_document_or_404
+from app.services.document_store import get_document_for_user_or_404
 from app.services.redaction_decision_store import (
     get_redaction_decision_state,
     save_redaction_decisions,
 )
+from app.api.dependencies.auth import get_current_user
+from app.services.auth_service import AuthenticatedUser
 
 router = APIRouter(prefix="/documents", tags=["redactions"])
 
 
 @router.get("/{document_id}/redaction-decisions")
-async def get_document_redaction_decisions(document_id: str):
-    get_document_or_404(document_id)
+async def get_document_redaction_decisions(
+    document_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     return get_redaction_decision_state(document_id)
 
@@ -35,8 +43,12 @@ async def get_document_redaction_decisions(document_id: str):
 async def save_document_redaction_decisions(
     document_id: str,
     request: SaveRedactionDecisionsRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    get_document_or_404(document_id)
+    get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     if document_id != request.documentId:
         raise HTTPException(
@@ -75,8 +87,12 @@ async def save_document_redaction_decisions(
 async def apply_redactions(
     document_id: str,
     request: ApplyRedactionsRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    document = get_document_or_404(document_id)
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     if document_id != request.documentId:
 
@@ -196,8 +212,12 @@ async def apply_redactions(
 async def get_redaction_run_status(
     document_id: str,
     run_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    get_document_or_404(document_id)
+    get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     redaction_run = get_redaction_run(run_id)
 
@@ -219,8 +239,12 @@ async def get_redaction_run_status(
 async def cancel_redactions(
     document_id: str,
     run_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    get_document_or_404(document_id)
+    get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     cancelled = cancel_redaction_run(
         document_id=document_id,

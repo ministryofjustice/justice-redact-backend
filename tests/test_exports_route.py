@@ -2,6 +2,13 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.routers import exports
+from app.services.auth_service import AuthenticatedUser
+
+
+CURRENT_USER = AuthenticatedUser(
+    user_id="user-123",
+    email="user@justice.gov.uk",
+)
 
 
 def _document(
@@ -42,8 +49,8 @@ async def test_get_document_export_returns_requested_current_completed_run(
 ):
     monkeypatch.setattr(
         exports,
-        "get_document_or_404",
-        lambda document_id: _document(),
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: _document(),
     )
 
     monkeypatch.setattr(
@@ -62,6 +69,7 @@ async def test_get_document_export_returns_requested_current_completed_run(
     response = await exports.get_document_export(
         "document-123",
         "run-123",
+        current_user=CURRENT_USER,
     )
 
     assert response == {
@@ -78,6 +86,9 @@ async def test_get_document_export_returns_requested_current_completed_run(
         "exemptExportUrl": (
             "/documents/document-123/redaction-runs/run-123/exempt-file"
         ),
+        "allFilesExportUrl": (
+            "/documents/document-123/redaction-runs/run-123/all-files"
+        ),
         "pageCount": 10,
         "pageCounts": {
             "original": 10,
@@ -89,13 +100,13 @@ async def test_get_document_export_returns_requested_current_completed_run(
 
 
 @pytest.mark.anyio
-async def test_get_document_export_returns_superseded_completed_run_metadata(
+async def test_get_document_export_rejects_superseded_completed_run(
     monkeypatch,
 ):
     monkeypatch.setattr(
         exports,
-        "get_document_or_404",
-        lambda document_id: _document(
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: _document(
             current_run_id="run-new",
             status="applying_redactions",
         ),
@@ -108,39 +119,30 @@ async def test_get_document_export_returns_superseded_completed_run_metadata(
         raising=False,
     )
 
+    s3_called = False
+
+    def fake_object_exists_in_s3(key):
+        nonlocal s3_called
+        s3_called = True
+        return True
+
     monkeypatch.setattr(
         exports,
         "object_exists_in_s3",
-        lambda key: True,
+        fake_object_exists_in_s3,
     )
 
-    response = await exports.get_document_export(
-        "document-123",
-        "run-old",
-    )
+    with pytest.raises(exports.HTTPException) as exc_info:
+        await exports.get_document_export(
+            "document-123",
+            "run-old",
+            current_user=CURRENT_USER,
+        )
 
-    assert response == {
-        "documentId": "document-123",
-        "runId": "run-old",
-        "filename": "example.pdf",
-        "status": "redaction_complete",
-        "redactedExportUrl": (
-            "/documents/document-123/redaction-runs/run-old/redacted-file"
-        ),
-        "vettedExportUrl": (
-            "/documents/document-123/redaction-runs/run-old/vetted-file"
-        ),
-        "exemptExportUrl": (
-            "/documents/document-123/redaction-runs/run-old/exempt-file"
-        ),
-        "pageCount": 10,
-        "pageCounts": {
-            "original": 10,
-            "exempt": 1,
-            "deleted": 2,
-            "redacted": 7,
-        },
-    }
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Redaction run has been superseded"
+
+    assert s3_called is False
 
 
 @pytest.mark.anyio
@@ -149,8 +151,8 @@ async def test_download_redacted_file_rejects_superseded_run(
 ):
     monkeypatch.setattr(
         exports,
-        "get_document_or_404",
-        lambda document_id: _document(
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: _document(
             current_run_id="run-new",
         ),
     )
@@ -174,6 +176,7 @@ async def test_download_redacted_file_rejects_superseded_run(
         await exports.download_redacted_file(
             "document-123",
             "run-old",
+            current_user=CURRENT_USER,
         )
 
     assert exc_info.value.status_code == 409
@@ -188,8 +191,8 @@ async def test_download_vetted_file_rejects_superseded_run(
 ):
     monkeypatch.setattr(
         exports,
-        "get_document_or_404",
-        lambda document_id: _document(
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: _document(
             current_run_id="run-new",
         ),
     )
@@ -212,6 +215,7 @@ async def test_download_vetted_file_rejects_superseded_run(
         await exports.download_vetted_file(
             "document-123",
             "run-old",
+            current_user=CURRENT_USER,
         )
 
     assert exc_info.value.status_code == 409
@@ -226,8 +230,8 @@ async def test_download_exempt_file_rejects_superseded_run(
 ):
     monkeypatch.setattr(
         exports,
-        "get_document_or_404",
-        lambda document_id: _document(
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: _document(
             current_run_id="run-new",
         ),
     )
@@ -250,9 +254,53 @@ async def test_download_exempt_file_rejects_superseded_run(
         await exports.download_exempt_file(
             "document-123",
             "run-old",
+            current_user=CURRENT_USER,
         )
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "Redaction run has been superseded"
 
     assert object_reads == []
+
+
+@pytest.mark.anyio
+async def test_download_redacted_file_checks_ownership_before_s3_access(
+    monkeypatch,
+):
+    def reject_document(
+        document_id,
+        user_id,
+    ):
+        raise exports.HTTPException(
+            status_code=404,
+            detail="Document not found",
+        )
+
+    monkeypatch.setattr(
+        exports,
+        "get_document_for_user_or_404",
+        reject_document,
+    )
+
+    s3_called = False
+
+    def fake_object_exists_in_s3(key):
+        nonlocal s3_called
+        s3_called = True
+        return True
+
+    monkeypatch.setattr(
+        exports,
+        "object_exists_in_s3",
+        fake_object_exists_in_s3,
+    )
+
+    with pytest.raises(exports.HTTPException) as exc_info:
+        await exports.download_redacted_file(
+            "document-123",
+            "run-123",
+            current_user=CURRENT_USER,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert s3_called is False

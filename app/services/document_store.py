@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 from datetime import datetime, timezone
-from sqlalchemy import and_, case, or_, update
+from sqlalchemy import and_, case, or_, select, update
 
 from app.core.database import SessionLocal
 from app.models.document import Document
@@ -62,6 +62,7 @@ def document_to_dict(document: Document) -> dict:
 
 def create_document_record(
     document_id: str,
+    owner_user_id: str,
     filename: str,
     document_type: str,
     warning_reason: str | None = None,
@@ -69,6 +70,7 @@ def create_document_record(
     with SessionLocal() as session:
         document = Document(
             document_id=document_id,
+            owner_user_id=owner_user_id,
             filename=filename,
             status="uploaded",
             document_type=document_type,
@@ -102,6 +104,35 @@ def get_document_or_404(document_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Document not found")
 
     return document
+
+
+def get_document_for_user_or_404(
+    document_id: str,
+    user_id: str,
+) -> dict:
+    """
+    Return a document only when it belongs to the authenticated user.
+
+    A document owned by another user is deliberately indistinguishable
+    from a document that does not exist. This prevents document-ID
+    enumeration from revealing another user's records.
+    """
+
+    with SessionLocal() as session:
+        document = session.execute(
+            select(Document).where(
+                Document.document_id == document_id,
+                Document.owner_user_id == user_id,
+            )
+        ).scalar_one_or_none()
+
+        if document is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Document not found",
+            )
+
+        return document_to_dict(document)
 
 
 def update_document_record(

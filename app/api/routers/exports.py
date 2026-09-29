@@ -1,10 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from app.logging_config import logger
-from app.services.document_store import get_document_or_404
+from app.services.document_store import get_document_for_user_or_404
 from app.services.redaction_run_store import get_redaction_run
 from app.services.s3_keys import (
     redaction_run_exempt_pdf_key,
@@ -12,6 +12,8 @@ from app.services.s3_keys import (
     redaction_run_vetted_pdf_key,
 )
 from app.services.s3_service import get_object_from_s3, object_exists_in_s3
+from app.api.dependencies.auth import get_current_user
+from app.services.auth_service import AuthenticatedUser
 
 router = APIRouter(prefix="/documents", tags=["exports"])
 
@@ -74,8 +76,12 @@ def _get_current_completed_run(
 async def get_document_export(
     document_id: str,
     run_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    document = get_document_or_404(document_id)
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     redaction_run = _get_current_completed_run(
         document=document,
@@ -175,8 +181,12 @@ async def get_document_export(
 async def download_all_files(
     document_id: str,
     run_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    document = get_document_or_404(document_id)
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     _get_current_completed_run(
         document=document,
@@ -275,8 +285,12 @@ async def download_all_files(
 async def download_redacted_file(
     document_id: str,
     run_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    document = get_document_or_404(document_id)
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     _get_current_completed_run(
         document=document,
@@ -323,8 +337,12 @@ async def download_redacted_file(
 async def download_vetted_file(
     document_id: str,
     run_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    document = get_document_or_404(document_id)
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     _get_current_completed_run(
         document=document,
@@ -371,8 +389,12 @@ async def download_vetted_file(
 async def download_exempt_file(
     document_id: str,
     run_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    document = get_document_or_404(document_id)
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     _get_current_completed_run(
         document=document,
