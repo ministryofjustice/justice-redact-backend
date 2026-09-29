@@ -47,9 +47,7 @@ async def test_request_verification_sends_email_and_sets_browser_cookie(
         verification_link,
     ):
         captured["email"] = email
-        captured["link"] = (
-            verification_link
-        )
+        captured["link"] = verification_link
 
         return "notification-123"
 
@@ -64,36 +62,21 @@ async def test_request_verification_sends_email_and_sets_browser_cookie(
     response = Response()
 
     result = await auth.request_verification(
-        auth.RequestVerificationRequest(
-            email="user@justice.gov.uk"
-        ),
+        auth.RequestVerificationRequest(email="user@justice.gov.uk"),
         response,
     )
 
     assert result == {
-        "status": (
-            "verification_email_sent"
-        ),
+        "status": ("verification_email_sent"),
     }
 
-    assert captured["email"] == (
-        "user@justice.gov.uk"
-    )
+    assert captured["email"] == ("user@justice.gov.uk")
 
-    assert (
-        "#token=email-secret"
-        in captured["link"]
-    )
+    assert "#token=email-secret" in captured["link"]
 
-    cookie = response.headers[
-        "set-cookie"
-    ]
+    cookie = response.headers["set-cookie"]
 
-    assert (
-        auth.settings
-        .auth_verification_cookie_name
-        in cookie
-    )
+    assert auth.settings.auth_verification_cookie_name in cookie
 
     assert "browser-secret" in cookie
     assert "HttpOnly" in cookie
@@ -115,20 +98,13 @@ async def test_request_verification_rejects_user_without_access(
     from fastapi import HTTPException
     from fastapi import Response
 
-    with pytest.raises(
-        HTTPException
-    ) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         await auth.request_verification(
-            auth.RequestVerificationRequest(
-                email="user@justice.gov.uk"
-            ),
+            auth.RequestVerificationRequest(email="user@justice.gov.uk"),
             Response(),
         )
 
-    assert (
-        exc_info.value.status_code
-        == 403
-    )
+    assert exc_info.value.status_code == 403
 
 
 @pytest.mark.anyio
@@ -154,9 +130,7 @@ async def test_verify_sets_session_cookie(
     monkeypatch.setattr(
         auth,
         "verify_email_token",
-        lambda email_token, browser_token: (
-            verified
-        ),
+        lambda email_token, browser_token: (verified),
     )
 
     from fastapi import Response
@@ -164,26 +138,18 @@ async def test_verify_sets_session_cookie(
     response = Response()
 
     result = await auth.verify_email(
-        auth.VerifyEmailRequest(
-            token="email-secret"
-        ),
+        auth.VerifyEmailRequest(token="email-secret"),
         response,
         browser_token="browser-secret",
     )
 
-    assert result["userId"] == (
-        "user-123"
-    )
+    assert result["userId"] == ("user-123")
 
-    cookie_headers = response.headers.getlist(
-        "set-cookie"
-    )
+    cookie_headers = response.headers.getlist("set-cookie")
 
     assert any(
         (
-            auth.settings
-            .auth_session_cookie_name
-            in cookie
+            auth.settings.auth_session_cookie_name in cookie
             and "session-secret" in cookie
             and "HttpOnly" in cookie
         )
@@ -198,79 +164,32 @@ async def test_verify_rejects_invalid_challenge(
     monkeypatch.setattr(
         auth,
         "verify_email_token",
-        lambda email_token, browser_token: (
-            None
-        ),
+        lambda email_token, browser_token: (None),
     )
 
     from fastapi import HTTPException
     from fastapi import Response
 
-    with pytest.raises(
-        HTTPException
-    ) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         await auth.verify_email(
-            auth.VerifyEmailRequest(
-                token="invalid"
-            ),
+            auth.VerifyEmailRequest(token="invalid"),
             Response(),
             browser_token="browser-secret",
         )
 
-    assert (
-        exc_info.value.status_code
-        == 400
-    )
+    assert exc_info.value.status_code == 400
 
 
 @pytest.mark.anyio
 async def test_me_returns_authenticated_user():
-    result = (
-        await auth
-        .get_authenticated_session(
-            AuthenticatedUser(
-                user_id="user-123",
-                email=(
-                    "user@justice.gov.uk"
-                ),
-            )
+    result = await auth.get_authenticated_session(
+        AuthenticatedUser(
+            user_id="user-123",
+            email=("user@justice.gov.uk"),
         )
     )
 
     assert result == {
         "userId": "user-123",
         "email": "user@justice.gov.uk",
-    }
-
-
-@pytest.mark.anyio
-async def test_logout_revokes_session_and_clears_cookie(
-    monkeypatch,
-):
-    captured = {}
-
-    monkeypatch.setattr(
-        auth,
-        "revoke_authenticated_session",
-        lambda token: captured.update(
-            token=token
-        )
-        or True,
-    )
-
-    from fastapi import Response
-
-    response = Response()
-
-    result = await auth.logout(
-        response,
-        session_token="session-secret",
-    )
-
-    assert captured["token"] == (
-        "session-secret"
-    )
-
-    assert result == {
-        "status": "logged_out",
     }

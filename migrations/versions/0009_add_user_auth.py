@@ -140,11 +140,6 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column(
-            "revoked_at",
-            sa.DateTime(timezone=True),
-            nullable=True,
-        ),
-        sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
             server_default=sa.text("now()"),

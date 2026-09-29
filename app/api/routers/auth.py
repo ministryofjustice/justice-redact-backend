@@ -20,7 +20,6 @@ from app.services.auth_service import (
     AccessNotEnabledError,
     AuthenticatedUser,
     create_verification_challenge,
-    revoke_authenticated_session,
     verify_email_token,
 )
 from app.services.notify_service import send_verification_email
@@ -45,20 +44,14 @@ def _verification_link(
     token to /auth/verify.
     """
 
-    frontend_base_url = (
-        settings.auth_frontend_base_url.rstrip("/")
-    )
+    frontend_base_url = settings.auth_frontend_base_url.rstrip("/")
 
     encoded_token = quote(
         token,
         safe="",
     )
 
-    return (
-        f"{frontend_base_url}"
-        f"/confirm-email"
-        f"#token={encoded_token}"
-    )
+    return f"{frontend_base_url}" f"/confirm-email" f"#token={encoded_token}"
 
 
 @router.post("/request-verification")
@@ -67,9 +60,7 @@ async def request_verification(
     response: Response,
 ):
     try:
-        challenge = create_verification_challenge(
-            request.email
-        )
+        challenge = create_verification_challenge(request.email)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -78,14 +69,10 @@ async def request_verification(
     except AccessNotEnabledError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "You cannot use Justice Redact yet"
-            ),
+            detail=("You cannot use Justice Redact yet"),
         ) from exc
 
-    verification_link = _verification_link(
-        challenge.email_token
-    )
+    verification_link = _verification_link(challenge.email_token)
 
     try:
         send_verification_email(
@@ -97,20 +84,14 @@ async def request_verification(
         logger.exception(
             "email_verification_send_failed",
             extra={
-                "event": (
-                    "email_verification_send_failed"
-                ),
-                "verification_id": (
-                    challenge.verification_id
-                ),
+                "event": ("email_verification_send_failed"),
+                "verification_id": (challenge.verification_id),
             },
         )
 
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "The verification email could not be sent"
-            ),
+            detail=("The verification email could not be sent"),
         ) from exc
 
     response.set_cookie(
@@ -119,10 +100,7 @@ async def request_verification(
         httponly=True,
         secure=settings.auth_cookie_secure,
         samesite=settings.auth_cookie_samesite,
-        max_age=(
-            settings.auth_verification_token_ttl_minutes
-            * 60
-        ),
+        max_age=(settings.auth_verification_token_ttl_minutes * 60),
         path="/",
     )
 
@@ -130,9 +108,7 @@ async def request_verification(
         "email_verification_requested",
         extra={
             "event": "email_verification_requested",
-            "verification_id": (
-                challenge.verification_id
-            ),
+            "verification_id": (challenge.verification_id),
         },
     )
 
@@ -158,9 +134,7 @@ async def verify_email(
     if verified_session is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "The confirmation link was not recognised"
-            ),
+            detail=("The confirmation link was not recognised"),
         )
 
     response.set_cookie(
@@ -169,12 +143,7 @@ async def verify_email(
         httponly=True,
         secure=settings.auth_cookie_secure,
         samesite=settings.auth_cookie_samesite,
-        max_age=(
-            settings.auth_session_ttl_days
-            * 24
-            * 60
-            * 60
-        ),
+        max_age=(settings.auth_session_ttl_days * 24 * 60 * 60),
         path="/",
     )
 
@@ -190,65 +159,22 @@ async def verify_email(
         "user_authenticated",
         extra={
             "event": "user_authenticated",
-            "user_id": (
-                verified_session.user.user_id
-            ),
+            "user_id": (verified_session.user.user_id),
         },
     )
 
     return {
-        "userId": (
-            verified_session.user.user_id
-        ),
-        "email": (
-            verified_session.user.email
-        ),
-        "expiresAt": (
-            verified_session.expires_at.isoformat()
-        ),
+        "userId": (verified_session.user.user_id),
+        "email": (verified_session.user.email),
+        "expiresAt": (verified_session.expires_at.isoformat()),
     }
 
 
 @router.get("/me")
 async def get_authenticated_session(
-    current_user: AuthenticatedUser = Depends(
-        get_current_user
-    ),
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
     return {
         "userId": current_user.user_id,
         "email": current_user.email,
-    }
-
-
-@router.post("/logout")
-async def logout(
-    response: Response,
-    session_token: str | None = Cookie(
-        default=None,
-        alias=settings.auth_session_cookie_name,
-    ),
-):
-    revoke_authenticated_session(
-        session_token
-    )
-
-    response.delete_cookie(
-        key=settings.auth_session_cookie_name,
-        path="/",
-        secure=settings.auth_cookie_secure,
-        httponly=True,
-        samesite=settings.auth_cookie_samesite,
-    )
-
-    response.delete_cookie(
-        key=settings.auth_verification_cookie_name,
-        path="/",
-        secure=settings.auth_cookie_secure,
-        httponly=True,
-        samesite=settings.auth_cookie_samesite,
-    )
-
-    return {
-        "status": "logged_out",
     }

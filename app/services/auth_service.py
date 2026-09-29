@@ -16,7 +16,6 @@ from app.services.auth_store import (
     create_email_verification,
     get_access_enabled_user_by_email,
     get_user_for_session,
-    revoke_session,
 )
 
 
@@ -195,18 +194,4 @@ def get_authenticated_user(
     return AuthenticatedUser(
         user_id=user["userId"],
         email=user["email"],
-    )
-
-
-def revoke_authenticated_session(
-    token: str | None,
-    *,
-    now: datetime | None = None,
-) -> bool:
-    if not token:
-        return False
-
-    return revoke_session(
-        session_token_hash=(_hash_secret(token)),
-        now=now or _utc_now(),
     )

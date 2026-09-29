@@ -47,11 +47,6 @@ class UserSession(Base):
         nullable=False,
     )
 
-    revoked_at = Column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

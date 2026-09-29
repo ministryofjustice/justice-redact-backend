@@ -148,7 +148,6 @@ def get_user_for_session(
             )
             .where(
                 UserSession.session_token_hash == session_token_hash,
-                UserSession.revoked_at.is_(None),
                 UserSession.expires_at > now,
                 User.access_enabled.is_(True),
             )
@@ -161,28 +160,3 @@ def get_user_for_session(
             "userId": user.user_id,
             "email": user.email,
         }
-
-
-def revoke_session(
-    *,
-    session_token_hash: str,
-    now: datetime,
-) -> bool:
-    with SessionLocal() as session:
-        user_session = session.execute(
-            select(UserSession)
-            .where(UserSession.session_token_hash == session_token_hash)
-            .with_for_update()
-        ).scalar_one_or_none()
-
-        if user_session is None:
-            return False
-
-        if user_session.revoked_at is not None:
-            return True
-
-        user_session.revoked_at = now
-
-        session.commit()
-
-        return True
