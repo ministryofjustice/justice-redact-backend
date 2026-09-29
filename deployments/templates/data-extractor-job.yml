@@ -65,11 +65,11 @@ spec:
 
               resources:
                 requests:
-                  cpu: 250m
-                  memory: 512Mi
+                  cpu: 500m
+                  memory: 1Gi
                 limits:
-                  cpu: "1"
-                  memory: 3Gi
+                  cpu: "2"
+                  memory: 6Gi # Increased from 3Gi to accommodate the extractor's memory usage when dumping large tables.
 
               env:
                 # --- PostgreSQL connection (source: rds-postgresql-instance-output) ---
