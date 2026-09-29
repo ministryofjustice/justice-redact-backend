@@ -12,6 +12,11 @@ data:
         Parsers_File  parsers.conf
         Storage.path  /var/log/flb-storage
 
+        # Expose Fluent Bit's built-in monitoring endpoint for Kubernetes probes
+        HTTP_Server   On
+        HTTP_Listen   0.0.0.0
+        HTTP_Port     2020
+
     [INPUT]
         Name              tail
         Path              /var/log/app/app.log

@@ -140,6 +140,15 @@ spec:
           image: fluent/fluent-bit:3.1
           imagePullPolicy: Always
 
+          livenessProbe:
+            httpGet:
+              path: /api/v1/uptime
+              port: 2020
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
           # Load the in-cluster OpenSearch proxy connection details.
           env:
             - name: OPENSEARCH_PROXY_HOST
@@ -167,7 +176,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
-            runAsUser: 1000
+            runAsUser: 10001
             readOnlyRootFilesystem: true
             capabilities:
               drop:
