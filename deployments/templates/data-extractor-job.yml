@@ -56,6 +56,13 @@ spec:
                   drop:
                     - ALL
 
+              volumeMounts:
+                # The extractor writes events.log and its local snapshot files
+                # under /db-exporter before uploading to S3 — give it somewhere
+                # writable rather than loosening the rest of the security context.
+                - name: tmp
+                  mountPath: /db-exporter
+
               env:
                 # --- PostgreSQL connection (source: rds-postgresql-instance-output) ---
                 - name: PGHOST
@@ -108,3 +115,7 @@ spec:
                 # service — check the extractor README before enabling.
                 # - name: SAVE_EVENTS_LOG
                 #   value: "true"
+
+          volumes:
+            - name: tmp
+              emptyDir: {}
