@@ -63,6 +63,14 @@ spec:
                 - name: tmp
                   mountPath: /db-exporter
 
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 512Mi
+                limits:
+                  cpu: "1"
+                  memory: 3Gi
+
               env:
                 # --- PostgreSQL connection (source: rds-postgresql-instance-output) ---
                 - name: PGHOST
