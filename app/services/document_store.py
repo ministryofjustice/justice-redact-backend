@@ -1,10 +1,20 @@
 from fastapi import HTTPException
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_, case, or_, select, update
 
 from app.core.database import SessionLocal
 from app.models.document import Document
 from app.models.user import User
+
+
+DOCUMENT_RESUME_LIFETIME = timedelta(days=30)
+
+
+def _normalise_to_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+
+    return value.astimezone(timezone.utc)
 
 
 def document_to_dict(document: Document) -> dict:
@@ -131,6 +141,15 @@ def get_document_for_user_or_404(
             raise HTTPException(
                 status_code=404,
                 detail="Document not found",
+            )
+
+        created_at = _normalise_to_utc(document.created_at)
+        expires_at = created_at + DOCUMENT_RESUME_LIFETIME
+
+        if datetime.now(timezone.utc) >= expires_at:
+            raise HTTPException(
+                status_code=410,
+                detail="Document link expired",
             )
 
         return document_to_dict(document)
