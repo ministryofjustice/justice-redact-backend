@@ -52,25 +52,6 @@ def test_domain_check_does_not_use_unsafe_suffix_matching(
         (auth_service.normalise_and_validate_email("test@notjustice.gov.uk"))
 
 
-def test_create_verification_challenge_rejects_user_without_access(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        auth_service.settings,
-        "auth_allowed_email_domains",
-        "justice.gov.uk",
-    )
-
-    monkeypatch.setattr(
-        auth_service,
-        "get_access_enabled_user_by_email",
-        lambda email: None,
-    )
-
-    with pytest.raises(auth_service.AccessNotEnabledError):
-        (auth_service.create_verification_challenge("user@justice.gov.uk"))
-
-
 def test_create_verification_challenge_persists_only_hashes(
     monkeypatch,
 ):
@@ -78,15 +59,6 @@ def test_create_verification_challenge_persists_only_hashes(
         auth_service.settings,
         "auth_allowed_email_domains",
         "justice.gov.uk",
-    )
-
-    monkeypatch.setattr(
-        auth_service,
-        "get_access_enabled_user_by_email",
-        lambda email: {
-            "userId": "user-123",
-            "email": email,
-        },
     )
 
     generated_tokens = iter(
@@ -106,12 +78,12 @@ def test_create_verification_challenge_persists_only_hashes(
 
     def fake_create_email_verification(
         *,
-        user_id,
+        email,
         token_hash,
         browser_token_hash,
         expires_at,
     ):
-        captured["user_id"] = user_id
+        captured["email"] = email
         captured["token_hash"] = token_hash
         captured["browser_token_hash"] = browser_token_hash
 
@@ -144,6 +116,8 @@ def test_create_verification_challenge_persists_only_hashes(
     assert result.email_token == "raw-email-token"
 
     assert result.browser_token == "raw-browser-token"
+
+    assert captured["email"] == "user@justice.gov.uk"
 
     assert captured["token_hash"] != "raw-email-token"
 
@@ -251,4 +225,20 @@ def test_verify_email_token_rejects_unusable_link(
         auth_service.verify_email_token(
             "email-token",
             "wrong-browser-token",
+        )
+
+
+def test_verify_email_token_rejects_user_without_access(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        auth_service,
+        "consume_verification_and_create_session",
+        lambda **kwargs: "access_not_enabled",
+    )
+
+    with pytest.raises(auth_service.AccessNotEnabledError):
+        auth_service.verify_email_token(
+            "email-token",
+            "browser-token",
         )

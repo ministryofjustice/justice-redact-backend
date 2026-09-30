@@ -83,28 +83,33 @@ async def test_request_verification_sends_email_and_sets_browser_cookie(
 
 
 @pytest.mark.anyio
-async def test_request_verification_rejects_user_without_access(
+async def test_verify_rejects_user_without_access(
     monkeypatch,
 ):
-    def reject(email):
-        raise AccessNotEnabledError()
+    def reject_access(
+        email_token,
+        browser_token,
+    ):
+        raise auth.AccessNotEnabledError
 
     monkeypatch.setattr(
         auth,
-        "create_verification_challenge",
-        reject,
+        "verify_email_token",
+        reject_access,
     )
 
     from fastapi import HTTPException
     from fastapi import Response
 
     with pytest.raises(HTTPException) as exc_info:
-        await auth.request_verification(
-            auth.RequestVerificationRequest(email="user@justice.gov.uk"),
+        await auth.verify_email(
+            auth.VerifyEmailRequest(token="email-secret"),
             Response(),
+            browser_token="browser-secret",
         )
 
     assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "You cannot use Justice Redact yet"
 
 
 @pytest.mark.anyio

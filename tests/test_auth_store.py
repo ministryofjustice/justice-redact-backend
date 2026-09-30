@@ -29,9 +29,7 @@ def install_auth_store_test_database(
     )
 
     User.__table__.create(engine)
-    EmailVerificationToken.__table__.create(
-        engine
-    )
+    EmailVerificationToken.__table__.create(engine)
     UserSession.__table__.create(engine)
 
     test_session_local = sessionmaker(
@@ -52,34 +50,31 @@ def install_auth_store_test_database(
 def add_verification(
     test_session_local,
     *,
+    email: str = "user@justice.gov.uk",
     token_hash: str = "email-token-hash",
     browser_token_hash: str = "browser-token-hash",
     expires_at: datetime | None = None,
     consumed_at: datetime | None = None,
+    create_user: bool = True,
     access_enabled: bool = True,
 ):
     with test_session_local() as session:
-        session.add(
-            User(
-                user_id="user-123",
-                email="user@justice.gov.uk",
-                access_enabled=access_enabled,
+        if create_user:
+            session.add(
+                User(
+                    user_id="user-123",
+                    email=email,
+                    access_enabled=access_enabled,
+                )
             )
-        )
 
         session.add(
             EmailVerificationToken(
                 verification_id="verification-123",
-                user_id="user-123",
+                email=email,
                 token_hash=token_hash,
-                browser_token_hash=(
-                    browser_token_hash
-                ),
-                expires_at=(
-                    expires_at
-                    or NOW
-                    + timedelta(minutes=30)
-                ),
+                browser_token_hash=browser_token_hash,
+                expires_at=(expires_at or NOW + timedelta(minutes=30)),
                 consumed_at=consumed_at,
             )
         )
@@ -91,39 +86,50 @@ def consume(
     **overrides,
 ):
     values = {
-        "verification_token_hash":
-            "email-token-hash",
-        "browser_token_hash":
-            "browser-token-hash",
-        "session_token_hash":
-            "session-token-hash",
-        "session_expires_at":
-            NOW + timedelta(days=7),
+        "verification_token_hash": "email-token-hash",
+        "browser_token_hash": "browser-token-hash",
+        "session_token_hash": "session-token-hash",
+        "session_expires_at": NOW + timedelta(days=7),
         "now": NOW,
     }
 
     values.update(overrides)
 
-    return (
-        auth_store
-        .consume_verification_and_create_session(
-            **values
-        )
+    return auth_store.consume_verification_and_create_session(**values)
+
+
+def test_create_email_verification_does_not_require_user(
+    monkeypatch,
+):
+    test_session_local = install_auth_store_test_database(monkeypatch)
+
+    verification_id = auth_store.create_email_verification(
+        email="not-in-cohort@justice.gov.uk",
+        token_hash="email-token-hash",
+        browser_token_hash="browser-token-hash",
+        expires_at=NOW + timedelta(minutes=30),
     )
+
+    with test_session_local() as session:
+        verification = session.get(
+            EmailVerificationToken,
+            verification_id,
+        )
+
+        assert verification is not None
+        assert verification.email == "not-in-cohort@justice.gov.uk"
+        assert verification.token_hash == "email-token-hash"
+        assert verification.browser_token_hash == "browser-token-hash"
+
+        assert session.query(User).count() == 0
 
 
 def test_consume_verification_creates_session(
     monkeypatch,
 ):
-    test_session_local = (
-        install_auth_store_test_database(
-            monkeypatch
-        )
-    )
+    test_session_local = install_auth_store_test_database(monkeypatch)
 
-    add_verification(
-        test_session_local
-    )
+    add_verification(test_session_local)
 
     result = consume()
 
@@ -141,69 +147,38 @@ def test_consume_verification_creates_session(
         assert verification is not None
         assert verification.consumed_at is not None
 
-        sessions = (
-            session.query(UserSession).all()
-        )
+        sessions = session.query(UserSession).all()
 
         assert len(sessions) == 1
 
-        assert (
-            sessions[0].user_id
-            == "user-123"
-        )
+        assert sessions[0].user_id == "user-123"
 
-        assert (
-            sessions[0].session_token_hash
-            == "session-token-hash"
-        )
+        assert sessions[0].session_token_hash == "session-token-hash"
 
 
 def test_consume_verification_rejects_unknown_token(
     monkeypatch,
 ):
-    test_session_local = (
-        install_auth_store_test_database(
-            monkeypatch
-        )
-    )
+    test_session_local = install_auth_store_test_database(monkeypatch)
 
-    add_verification(
-        test_session_local
-    )
+    add_verification(test_session_local)
 
-    result = consume(
-        verification_token_hash=(
-            "unknown-token-hash"
-        )
-    )
+    result = consume(verification_token_hash=("unknown-token-hash"))
 
     assert result == "token_not_recognised"
 
     with test_session_local() as session:
-        assert (
-            session.query(UserSession).count()
-            == 0
-        )
+        assert session.query(UserSession).count() == 0
 
 
 def test_consume_verification_rejects_wrong_browser(
     monkeypatch,
 ):
-    test_session_local = (
-        install_auth_store_test_database(
-            monkeypatch
-        )
-    )
+    test_session_local = install_auth_store_test_database(monkeypatch)
 
-    add_verification(
-        test_session_local
-    )
+    add_verification(test_session_local)
 
-    result = consume(
-        browser_token_hash=(
-            "different-browser-hash"
-        )
-    )
+    result = consume(browser_token_hash=("different-browser-hash"))
 
     assert result == "link_did_not_work"
 
@@ -216,26 +191,17 @@ def test_consume_verification_rejects_wrong_browser(
         assert verification is not None
         assert verification.consumed_at is None
 
-        assert (
-            session.query(UserSession).count()
-            == 0
-        )
+        assert session.query(UserSession).count() == 0
 
 
 def test_consume_verification_rejects_expired_link(
     monkeypatch,
 ):
-    test_session_local = (
-        install_auth_store_test_database(
-            monkeypatch
-        )
-    )
+    test_session_local = install_auth_store_test_database(monkeypatch)
 
     add_verification(
         test_session_local,
-        expires_at=(
-            NOW - timedelta(seconds=1)
-        ),
+        expires_at=(NOW - timedelta(seconds=1)),
     )
 
     result = consume()
@@ -243,26 +209,17 @@ def test_consume_verification_rejects_expired_link(
     assert result == "link_did_not_work"
 
     with test_session_local() as session:
-        assert (
-            session.query(UserSession).count()
-            == 0
-        )
+        assert session.query(UserSession).count() == 0
 
 
 def test_consume_verification_rejects_consumed_link(
     monkeypatch,
 ):
-    test_session_local = (
-        install_auth_store_test_database(
-            monkeypatch
-        )
-    )
+    test_session_local = install_auth_store_test_database(monkeypatch)
 
     add_verification(
         test_session_local,
-        consumed_at=(
-            NOW - timedelta(minutes=1)
-        ),
+        consumed_at=(NOW - timedelta(minutes=1)),
     )
 
     result = consume()
@@ -270,20 +227,13 @@ def test_consume_verification_rejects_consumed_link(
     assert result == "link_did_not_work"
 
     with test_session_local() as session:
-        assert (
-            session.query(UserSession).count()
-            == 0
-        )
+        assert session.query(UserSession).count() == 0
 
 
 def test_consume_verification_rejects_disabled_user(
     monkeypatch,
 ):
-    test_session_local = (
-        install_auth_store_test_database(
-            monkeypatch
-        )
-    )
+    test_session_local = install_auth_store_test_database(monkeypatch)
 
     add_verification(
         test_session_local,
@@ -292,10 +242,44 @@ def test_consume_verification_rejects_disabled_user(
 
     result = consume()
 
-    assert result == "link_did_not_work"
+    assert result == "access_not_enabled"
 
     with test_session_local() as session:
-        assert (
-            session.query(UserSession).count()
-            == 0
+        verification = session.get(
+            EmailVerificationToken,
+            "verification-123",
         )
+
+        assert verification is not None
+        assert verification.consumed_at is not None
+
+        assert session.query(UserSession).count() == 0
+
+    with test_session_local() as session:
+        assert session.query(UserSession).count() == 0
+
+
+def test_consume_verification_rejects_user_not_in_cohort(
+    monkeypatch,
+):
+    test_session_local = install_auth_store_test_database(monkeypatch)
+
+    add_verification(
+        test_session_local,
+        create_user=False,
+    )
+
+    result = consume()
+
+    assert result == "access_not_enabled"
+
+    with test_session_local() as session:
+        verification = session.get(
+            EmailVerificationToken,
+            "verification-123",
+        )
+
+        assert verification is not None
+        assert verification.consumed_at is not None
+
+        assert session.query(UserSession).count() == 0

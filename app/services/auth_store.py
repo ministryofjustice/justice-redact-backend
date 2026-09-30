@@ -34,7 +34,7 @@ def get_access_enabled_user_by_email(
 
 def create_email_verification(
     *,
-    user_id: str,
+    email: str,
     token_hash: str,
     browser_token_hash: str,
     expires_at: datetime,
@@ -42,8 +42,8 @@ def create_email_verification(
     """
     Persist a new verification challenge.
 
-    Only the latest unconsumed verification challenge for the user is
-    retained. Both secrets are stored only as SHA-256 hashes.
+    Only the latest unconsumed verification challenge for the email
+    is retained. Both secrets are stored only as SHA-256 hashes.
     """
 
     verification_id = str(uuid4())
@@ -51,16 +51,16 @@ def create_email_verification(
     with SessionLocal() as session:
         session.execute(
             delete(EmailVerificationToken).where(
-                EmailVerificationToken.user_id == user_id,
+                EmailVerificationToken.email == email,
                 EmailVerificationToken.consumed_at.is_(None),
             )
         )
 
         verification = EmailVerificationToken(
             verification_id=verification_id,
-            user_id=user_id,
+            email=email,
             token_hash=token_hash,
-            browser_token_hash=(browser_token_hash),
+            browser_token_hash=browser_token_hash,
             expires_at=expires_at,
         )
 
@@ -71,6 +71,7 @@ def create_email_verification(
 
 
 VerificationConsumeFailure = Literal[
+    "access_not_enabled",
     "link_did_not_work",
     "token_not_recognised",
 ]
@@ -124,14 +125,17 @@ def consume_verification_and_create_session(
         user = session.execute(
             select(User)
             .where(
-                User.user_id == verification.user_id,
+                User.email == verification.email,
                 User.access_enabled.is_(True),
             )
             .with_for_update()
         ).scalar_one_or_none()
 
         if user is None:
-            return "link_did_not_work"
+            verification.consumed_at = now
+            session.commit()
+
+            return "access_not_enabled"
 
         verification.consumed_at = now
         user.last_verified_at = now
