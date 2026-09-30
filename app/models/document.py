@@ -73,6 +73,11 @@ class Document(Base):
     processing_started_at = Column(DateTime(timezone=True), nullable=True)
     processing_completed_at = Column(DateTime(timezone=True), nullable=True)
 
+    ready_notification_sent_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     redaction_started_at = Column(DateTime(timezone=True), nullable=True)
     redaction_completed_at = Column(DateTime(timezone=True), nullable=True)
 

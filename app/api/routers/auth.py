@@ -97,7 +97,7 @@ async def request_verification(
         httponly=True,
         secure=settings.auth_cookie_secure,
         samesite=settings.auth_cookie_samesite,
-        max_age=(settings.auth_verification_token_ttl_minutes * 60),
+        expires=challenge.expires_at,
         path="/",
     )
 
@@ -150,7 +150,7 @@ async def verify_email(
         httponly=True,
         secure=settings.auth_cookie_secure,
         samesite=settings.auth_cookie_samesite,
-        max_age=(settings.auth_session_ttl_days * 24 * 60 * 60),
+        expires=verified_session.expires_at,
         path="/",
     )
 

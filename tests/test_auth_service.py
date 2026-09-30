@@ -128,15 +128,82 @@ def test_create_verification_challenge_persists_only_hashes(
     assert len(captured["browser_token_hash"]) == 64
 
 
-def test_verified_session_lasts_seven_days(
+def test_verification_challenge_expires_at_next_uk_midnight(
     monkeypatch,
 ):
     monkeypatch.setattr(
         auth_service.settings,
-        "auth_session_ttl_days",
-        7,
+        "auth_allowed_email_domains",
+        "justice.gov.uk",
     )
 
+    generated_tokens = iter(
+        [
+            "raw-email-token",
+            "raw-browser-token",
+        ]
+    )
+
+    monkeypatch.setattr(
+        auth_service.secrets,
+        "token_urlsafe",
+        lambda _: next(generated_tokens),
+    )
+
+    captured = {}
+
+    def fake_create_email_verification(
+        *,
+        email,
+        token_hash,
+        browser_token_hash,
+        expires_at,
+    ):
+        captured["expires_at"] = expires_at
+
+        return "verification-123"
+
+    monkeypatch.setattr(
+        auth_service,
+        "create_email_verification",
+        fake_create_email_verification,
+    )
+
+    # Wednesday 30 September 2026 at
+    # 13:00 BST / 12:00 UTC.
+    # The link should expire at 00:00 BST,
+    # which is 23:00 UTC.
+    now = datetime(
+        2026,
+        9,
+        30,
+        12,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    expected_expiry = datetime(
+        2026,
+        9,
+        30,
+        23,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    result = auth_service.create_verification_challenge(
+        "user@justice.gov.uk",
+        now=now,
+    )
+
+    assert result.expires_at == expected_expiry
+
+    assert captured["expires_at"] == expected_expiry
+
+
+def test_verified_session_expires_at_next_monday_midnight(
+    monkeypatch,
+):
     monkeypatch.setattr(
         auth_service.secrets,
         "token_urlsafe",
@@ -166,11 +233,24 @@ def test_verified_session_lasts_seven_days(
         fake_consume,
     )
 
+    # Wednesday 30 September 2026.
+    # The UK is on BST, so Monday 5 October
+    # 00:00 Europe/London is Sunday 4 October
+    # 23:00 UTC.
     now = datetime(
         2026,
         9,
-        29,
+        30,
         12,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    expected_expiry = datetime(
+        2026,
+        10,
+        4,
+        23,
         0,
         tzinfo=timezone.utc,
     )
@@ -181,11 +261,140 @@ def test_verified_session_lasts_seven_days(
         now=now,
     )
 
-    assert result is not None
+    assert result.expires_at == expected_expiry
 
-    assert result.expires_at == now + timedelta(days=7)
+    assert captured["session_expires_at"] == expected_expiry
 
-    assert captured["session_expires_at"] == now + timedelta(days=7)
+
+def test_verification_challenge_expiry_handles_gmt(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        auth_service.settings,
+        "auth_allowed_email_domains",
+        "justice.gov.uk",
+    )
+
+    generated_tokens = iter(
+        [
+            "raw-email-token",
+            "raw-browser-token",
+        ]
+    )
+
+    monkeypatch.setattr(
+        auth_service.secrets,
+        "token_urlsafe",
+        lambda _: next(generated_tokens),
+    )
+
+    captured = {}
+
+    def fake_create_email_verification(
+        *,
+        email,
+        token_hash,
+        browser_token_hash,
+        expires_at,
+    ):
+        captured["expires_at"] = expires_at
+
+        return "verification-123"
+
+    monkeypatch.setattr(
+        auth_service,
+        "create_email_verification",
+        fake_create_email_verification,
+    )
+
+    # November is GMT, so UK midnight is also 00:00 UTC.
+    now = datetime(
+        2026,
+        11,
+        10,
+        12,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    expected_expiry = datetime(
+        2026,
+        11,
+        11,
+        0,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    result = auth_service.create_verification_challenge(
+        "user@justice.gov.uk",
+        now=now,
+    )
+
+    assert result.expires_at == expected_expiry
+    assert captured["expires_at"] == expected_expiry
+
+
+def test_verified_session_expiry_handles_gmt(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        auth_service.secrets,
+        "token_urlsafe",
+        lambda _: "raw-session-token",
+    )
+
+    captured = {}
+
+    def fake_consume(
+        *,
+        verification_token_hash,
+        browser_token_hash,
+        session_token_hash,
+        session_expires_at,
+        now,
+    ):
+        captured["session_expires_at"] = session_expires_at
+
+        return {
+            "userId": "user-123",
+            "email": "user@justice.gov.uk",
+        }
+
+    monkeypatch.setattr(
+        auth_service,
+        "consume_verification_and_create_session",
+        fake_consume,
+    )
+
+    # Friday 30 October 2026 is GMT.
+    # Next Monday midnight is 2 November 00:00 UTC.
+    now = datetime(
+        2026,
+        10,
+        30,
+        12,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    expected_expiry = datetime(
+        2026,
+        11,
+        2,
+        0,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    result = auth_service.verify_email_token(
+        "raw-email-token",
+        "raw-browser-token",
+        now=now,
+    )
+
+    assert result.expires_at == expected_expiry
+    assert captured["session_expires_at"] == expected_expiry
 
 
 def test_verify_email_token_requires_browser_token():

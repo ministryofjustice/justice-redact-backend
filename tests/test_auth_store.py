@@ -124,6 +124,47 @@ def test_create_email_verification_does_not_require_user(
         assert session.query(User).count() == 0
 
 
+def test_creating_new_verification_invalidates_previous_link(
+    monkeypatch,
+):
+    test_session_local = install_auth_store_test_database(monkeypatch)
+
+    auth_store.create_email_verification(
+        email="user@justice.gov.uk",
+        token_hash="first-email-token-hash",
+        browser_token_hash="first-browser-token-hash",
+        expires_at=NOW + timedelta(hours=1),
+    )
+
+    auth_store.create_email_verification(
+        email="user@justice.gov.uk",
+        token_hash="second-email-token-hash",
+        browser_token_hash="second-browser-token-hash",
+        expires_at=NOW + timedelta(hours=1),
+    )
+
+    result = consume(
+        verification_token_hash=("first-email-token-hash"),
+        browser_token_hash=("first-browser-token-hash"),
+    )
+
+    assert result == "token_not_recognised"
+
+    with test_session_local() as session:
+        active_verifications = (
+            session.query(EmailVerificationToken)
+            .filter(
+                EmailVerificationToken.email == "user@justice.gov.uk",
+                EmailVerificationToken.consumed_at.is_(None),
+            )
+            .all()
+        )
+
+        assert len(active_verifications) == 1
+
+        assert active_verifications[0].token_hash == "second-email-token-hash"
+
+
 def test_consume_verification_creates_session(
     monkeypatch,
 ):
