@@ -65,13 +65,16 @@ spec:
 
               resources:
                 requests:
-                  cpu: 500m
-                  memory: 1Gi
+                  cpu: 250m
+                  memory: 512Mi
                 limits:
-                  cpu: "2"
-                  memory: 6Gi # Increased from 3Gi to accommodate the extractor's memory usage when dumping large tables.
+                  cpu: "1"
+                  memory: 3Gi
 
               env:
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+
                 # --- PostgreSQL connection (source: rds-postgresql-instance-output) ---
                 - name: PGHOST
                   valueFrom:
