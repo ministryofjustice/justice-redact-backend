@@ -6,9 +6,11 @@ import secrets
 from dataclasses import dataclass
 from datetime import (
     datetime,
+    time,
     timedelta,
     timezone,
 )
+from zoneinfo import ZoneInfo
 
 from app.core.settings import settings
 from app.services.auth_store import (
@@ -55,6 +57,46 @@ class VerifiedSession:
     user: AuthenticatedUser
     token: str
     expires_at: datetime
+
+
+UK_TIMEZONE = ZoneInfo("Europe/London")
+
+
+def _next_uk_midnight(
+    now: datetime,
+) -> datetime:
+    now_in_uk = now.astimezone(UK_TIMEZONE)
+
+    next_day = now_in_uk.date() + timedelta(days=1)
+
+    midnight_in_uk = datetime.combine(
+        next_day,
+        time.min,
+        tzinfo=UK_TIMEZONE,
+    )
+
+    return midnight_in_uk.astimezone(timezone.utc)
+
+
+def _next_monday_midnight(
+    now: datetime,
+) -> datetime:
+    now_in_uk = now.astimezone(UK_TIMEZONE)
+
+    days_until_monday = (7 - now_in_uk.weekday()) % 7
+
+    if days_until_monday == 0:
+        days_until_monday = 7
+
+    next_monday = now_in_uk.date() + timedelta(days=days_until_monday)
+
+    midnight_in_uk = datetime.combine(
+        next_monday,
+        time.min,
+        tzinfo=UK_TIMEZONE,
+    )
+
+    return midnight_in_uk.astimezone(timezone.utc)
 
 
 def _utc_now() -> datetime:
@@ -113,9 +155,7 @@ def create_verification_challenge(
     raw_email_token = secrets.token_urlsafe(32)
     raw_browser_token = secrets.token_urlsafe(32)
 
-    expires_at = current_time + timedelta(
-        minutes=settings.auth_verification_token_ttl_minutes
-    )
+    expires_at = _next_uk_midnight(current_time)
 
     verification_id = create_email_verification(
         email=normalised_email,
@@ -151,7 +191,7 @@ def verify_email_token(
 
     raw_session_token = secrets.token_urlsafe(48)
 
-    session_expires_at = current_time + timedelta(days=settings.auth_session_ttl_days)
+    session_expires_at = _next_monday_midnight(current_time)
 
     result = consume_verification_and_create_session(
         verification_token_hash=(_hash_secret(raw_email_token)),

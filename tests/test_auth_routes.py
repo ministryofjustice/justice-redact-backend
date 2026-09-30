@@ -27,8 +27,8 @@ async def test_request_verification_sends_email_and_sets_browser_cookie(
             2026,
             9,
             29,
-            12,
-            30,
+            23,
+            0,
             tzinfo=timezone.utc,
         ),
     )
@@ -81,6 +81,8 @@ async def test_request_verification_sends_email_and_sets_browser_cookie(
     assert "browser-secret" in cookie
     assert "HttpOnly" in cookie
 
+    assert "expires=Tue, 29 Sep 2026 23:00:00 GMT" in cookie
+
 
 @pytest.mark.anyio
 async def test_verify_rejects_user_without_access(
@@ -125,8 +127,8 @@ async def test_verify_sets_session_cookie(
         expires_at=datetime(
             2026,
             10,
-            6,
-            12,
+            4,
+            23,
             0,
             tzinfo=timezone.utc,
         ),
@@ -152,14 +154,15 @@ async def test_verify_sets_session_cookie(
 
     cookie_headers = response.headers.getlist("set-cookie")
 
-    assert any(
-        (
-            auth.settings.auth_session_cookie_name in cookie
-            and "session-secret" in cookie
-            and "HttpOnly" in cookie
-        )
+    session_cookie = next(
+        cookie
         for cookie in cookie_headers
+        if auth.settings.auth_session_cookie_name in cookie
     )
+
+    assert "session-secret" in session_cookie
+    assert "HttpOnly" in session_cookie
+    assert "expires=Sun, 04 Oct 2026 23:00:00 GMT" in session_cookie
 
 
 @pytest.mark.anyio

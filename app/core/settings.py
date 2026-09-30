@@ -15,10 +15,8 @@ class Settings(BaseSettings):
 
     auth_allowed_email_domains: str = "justice.gov.uk"
 
-    auth_verification_token_ttl_minutes: int = 30
     auth_verification_cookie_name: str = "justice_redact_email_verification"
 
-    auth_session_ttl_days: int = 7
     auth_session_cookie_name: str = "justice_redact_session"
 
     auth_cookie_secure: bool = True
