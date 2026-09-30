@@ -21,24 +21,52 @@ def send_verification_email(
     """
 
     if not settings.notify_api_key:
-        raise NotifyConfigurationError(
-            "GOV.UK Notify API key is not configured"
-        )
+        raise NotifyConfigurationError("GOV.UK Notify API key is not configured")
 
     if not settings.notify_verification_template_id:
         raise NotifyConfigurationError(
             "GOV.UK Notify verification template ID is not configured"
         )
 
-    client = NotificationsAPIClient(
-        settings.notify_api_key
-    )
+    client = NotificationsAPIClient(settings.notify_api_key)
 
     response = client.send_email_notification(
         email_address=email,
         template_id=settings.notify_verification_template_id,
         personalisation={
             "verification_link": verification_link,
+        },
+    )
+
+    return response["id"]
+
+
+def send_document_ready_email(
+    *,
+    email: str,
+    filename: str,
+    document_link: str,
+) -> str:
+    """
+    Send the Justice Redact document-ready email through GOV.UK Notify.
+    """
+
+    if not settings.notify_api_key:
+        raise NotifyConfigurationError("GOV.UK Notify API key is not configured")
+
+    if not settings.notify_document_ready_template_id:
+        raise NotifyConfigurationError(
+            "GOV.UK Notify document-ready template ID is not configured"
+        )
+
+    client = NotificationsAPIClient(settings.notify_api_key)
+
+    response = client.send_email_notification(
+        email_address=email,
+        template_id=settings.notify_document_ready_template_id,
+        personalisation={
+            "filename": filename,
+            "document_link": document_link,
         },
     )
 

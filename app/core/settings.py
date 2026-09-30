@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     notify_api_key: str | None = None
     notify_verification_template_id: str | None = None
+    notify_document_ready_template_id: str | None = None
 
     auth_frontend_base_url: str = "http://localhost:3000"
 

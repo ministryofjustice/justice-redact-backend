@@ -4,6 +4,7 @@ from sqlalchemy import and_, case, or_, select, update
 
 from app.core.database import SessionLocal
 from app.models.document import Document
+from app.models.user import User
 
 
 def document_to_dict(document: Document) -> dict:
@@ -133,6 +134,70 @@ def get_document_for_user_or_404(
             )
 
         return document_to_dict(document)
+
+
+def get_pending_ready_notification(
+    document_id: str,
+) -> dict | None:
+    """
+    Return the document owner's email only when the document is ready for
+    review and its ready notification has not already been recorded as sent.
+    """
+
+    with SessionLocal() as session:
+        row = session.execute(
+            select(
+                User.email,
+                Document.filename,
+            )
+            .join(
+                Document,
+                Document.owner_user_id == User.user_id,
+            )
+            .where(
+                Document.document_id == document_id,
+                Document.status == "ready_for_review",
+                Document.ready_notification_sent_at.is_(None),
+            )
+        ).one_or_none()
+
+        if row is None:
+            return None
+
+        return {
+            "email": row.email,
+            "filename": row.filename,
+        }
+
+
+def mark_ready_notification_sent(
+    *,
+    document_id: str,
+    sent_at: datetime,
+) -> bool:
+    """
+    Record that the ready-for-review email has been sent.
+
+    The conditional update means an already-recorded notification is not
+    overwritten by a later worker retry.
+    """
+
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.status == "ready_for_review",
+                Document.ready_notification_sent_at.is_(None),
+            )
+            .values(
+                ready_notification_sent_at=sent_at,
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
 
 
 def update_document_record(
