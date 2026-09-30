@@ -68,11 +68,6 @@ async def request_verification(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-    except AccessNotEnabledError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=("You cannot use Justice Redact yet"),
-        ) from exc
 
     verification_link = _verification_link(challenge.email_token)
 
@@ -133,6 +128,11 @@ async def verify_email(
             request.token,
             browser_token,
         )
+    except AccessNotEnabledError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You cannot use Justice Redact yet",
+        ) from exc
     except ConfirmationLinkDidNotWorkError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

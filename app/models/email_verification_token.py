@@ -1,7 +1,6 @@
 from sqlalchemy import (
     Column,
     DateTime,
-    ForeignKey,
     String,
     UniqueConstraint,
 )
@@ -25,12 +24,8 @@ class EmailVerificationToken(Base):
         primary_key=True,
     )
 
-    user_id = Column(
+    email = Column(
         String,
-        ForeignKey(
-            "users.user_id",
-            ondelete="CASCADE",
-        ),
         nullable=False,
         index=True,
     )

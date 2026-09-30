@@ -14,7 +14,6 @@ from app.core.settings import settings
 from app.services.auth_store import (
     consume_verification_and_create_session,
     create_email_verification,
-    get_access_enabled_user_by_email,
     get_user_for_session,
 )
 
@@ -111,31 +110,25 @@ def create_verification_challenge(
 
     normalised_email = normalise_and_validate_email(email)
 
-    user = get_access_enabled_user_by_email(normalised_email)
-
-    if user is None:
-        raise AccessNotEnabledError("User does not have access " "to Justice Redact")
-
     raw_email_token = secrets.token_urlsafe(32)
-
     raw_browser_token = secrets.token_urlsafe(32)
 
     expires_at = current_time + timedelta(
-        minutes=(settings.auth_verification_token_ttl_minutes)
+        minutes=settings.auth_verification_token_ttl_minutes
     )
 
     verification_id = create_email_verification(
-        user_id=user["userId"],
+        email=normalised_email,
         token_hash=_hash_secret(raw_email_token),
-        browser_token_hash=(_hash_secret(raw_browser_token)),
+        browser_token_hash=_hash_secret(raw_browser_token),
         expires_at=expires_at,
     )
 
     return VerificationChallenge(
         verification_id=verification_id,
-        email=user["email"],
+        email=normalised_email,
         email_token=raw_email_token,
-        browser_token=(raw_browser_token),
+        browser_token=raw_browser_token,
         expires_at=expires_at,
     )
 
@@ -173,6 +166,9 @@ def verify_email_token(
 
     if result == "link_did_not_work":
         raise ConfirmationLinkDidNotWorkError
+
+    if result == "access_not_enabled":
+        raise AccessNotEnabledError
 
     return VerifiedSession(
         user=AuthenticatedUser(
