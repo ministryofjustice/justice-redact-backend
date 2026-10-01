@@ -83,6 +83,16 @@ from app.services.workflow_service import resolve_workflow_navigation
             {"applying-redactions"},
         ),
         (
+            "redaction_failed",
+            None,
+            False,
+            "review",
+            {
+                "review",
+                "applying-redactions",
+            },
+        ),
+        (
             "redaction_complete",
             None,
             False,

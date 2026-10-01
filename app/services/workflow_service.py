@@ -58,7 +58,12 @@ def resolve_workflow_navigation(
     if status == "redaction_failed":
         return WorkflowNavigation(
             preferred_page="review",
-            allowed_pages=frozenset({"review"}),
+            allowed_pages=frozenset(
+                {
+                    "review",
+                    "applying-redactions",
+                }
+            ),
         )
 
     if status == "redaction_complete":
