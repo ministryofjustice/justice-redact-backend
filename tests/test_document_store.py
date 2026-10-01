@@ -1,6 +1,6 @@
 import pytest
 from types import SimpleNamespace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     DateTime,
@@ -434,6 +434,14 @@ class OwnershipTestDocument(OwnershipTestBase):
         default="",
     )
 
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(
+            timezone.utc,
+        ),
+    )
+
 
 def install_ownership_test_store(
     monkeypatch,
@@ -597,6 +605,116 @@ def test_get_document_for_user_returns_404_for_unowned_legacy_document(
         )
 
     assert exc_info.value.status_code == 404
+
+
+def test_get_document_for_user_allows_document_younger_than_30_days(
+    monkeypatch,
+):
+    test_session_local = install_ownership_test_store(
+        monkeypatch,
+    )
+
+    with test_session_local() as session:
+        session.add(
+            OwnershipTestDocument(
+                document_id="document-123",
+                owner_user_id="user-123",
+                filename="example.pdf",
+                status="ready_for_review",
+                document_type="nomis",
+                subject_name="",
+                subject_prison_number="",
+                other_phrases="",
+                created_at=(
+                    datetime.now(timezone.utc)
+                    - timedelta(
+                        days=29,
+                        hours=23,
+                    )
+                ),
+            )
+        )
+
+        session.commit()
+
+    result = document_store.get_document_for_user_or_404(
+        "document-123",
+        "user-123",
+    )
+
+    assert result["documentId"] == "document-123"
+
+
+def test_get_document_for_user_returns_410_at_30_days(
+    monkeypatch,
+):
+    test_session_local = install_ownership_test_store(
+        monkeypatch,
+    )
+
+    with test_session_local() as session:
+        session.add(
+            OwnershipTestDocument(
+                document_id="document-123",
+                owner_user_id="user-123",
+                filename="example.pdf",
+                status="ready_for_review",
+                document_type="nomis",
+                subject_name="",
+                subject_prison_number="",
+                other_phrases="",
+                created_at=(datetime.now(timezone.utc) - timedelta(days=30)),
+            )
+        )
+
+        session.commit()
+
+    with pytest.raises(
+        document_store.HTTPException,
+    ) as exc_info:
+        document_store.get_document_for_user_or_404(
+            "document-123",
+            "user-123",
+        )
+
+    assert exc_info.value.status_code == 410
+    assert exc_info.value.detail == "Document link expired"
+
+
+def test_get_document_for_user_checks_ownership_before_expiry(
+    monkeypatch,
+):
+    test_session_local = install_ownership_test_store(
+        monkeypatch,
+    )
+
+    with test_session_local() as session:
+        session.add(
+            OwnershipTestDocument(
+                document_id="document-123",
+                owner_user_id="user-a",
+                filename="example.pdf",
+                status="ready_for_review",
+                document_type="nomis",
+                subject_name="",
+                subject_prison_number="",
+                other_phrases="",
+                created_at=(datetime.now(timezone.utc) - timedelta(days=31)),
+            )
+        )
+
+        session.commit()
+
+    with pytest.raises(
+        document_store.HTTPException,
+    ) as exc_info:
+        document_store.get_document_for_user_or_404(
+            "document-123",
+            "user-b",
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Document not found"
 
 
 class NotificationTestBase(DeclarativeBase):

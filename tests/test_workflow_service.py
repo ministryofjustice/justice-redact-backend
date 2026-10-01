@@ -83,6 +83,16 @@ from app.services.workflow_service import resolve_workflow_navigation
             {"applying-redactions"},
         ),
         (
+            "redaction_failed",
+            None,
+            False,
+            "review",
+            {
+                "review",
+                "applying-redactions",
+            },
+        ),
+        (
             "redaction_complete",
             None,
             False,
@@ -120,7 +130,7 @@ def test_resolve_workflow_navigation(
     [
         ("enqueue_failed", "subject-details"),
         ("failed", "processing"),
-        ("redaction_failed", "applying-redactions"),
+        ("redaction_failed", "review"),
     ],
 )
 def test_failure_states_have_a_known_recovery_page(status, preferred_page):
