@@ -5,7 +5,7 @@ from app.models.document_requests import ProcessDocumentRequest
 from app.services.sqs_service import send_document_processing_message
 from app.services.document_store import (
     create_document_record,
-    get_document_or_404,
+    get_document_for_user_or_404,
     update_document_record,
     mark_document_processing_queued,
     try_start_document_processing_enqueue,
@@ -13,7 +13,7 @@ from app.services.document_store import (
 from app.services.file_store import save_upload_file
 from typing import Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from app.services.s3_service import get_object_from_s3
 from app.services.s3_keys import preview_image_key
@@ -21,6 +21,8 @@ from app.services.s3_keys import document_prefix
 from app.services.s3_service import delete_s3_prefix
 from app.services.workflow_service import build_workflow_response
 from app.services.document_store import try_abandon_document_processing
+from app.api.dependencies.auth import get_current_user
+from app.services.auth_service import AuthenticatedUser
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -42,6 +44,7 @@ async def upload_document(
         None,
         alias="warningReason",
     ),
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
     uploaded_filename = file.filename or "document.pdf"
 
@@ -66,6 +69,7 @@ async def upload_document(
 
     create_document_record(
         document_id=document_id,
+        owner_user_id=current_user.user_id,
         filename=uploaded_filename,
         document_type=document_type,
         warning_reason=warning_reason,
@@ -91,8 +95,12 @@ async def upload_document(
 async def process_document(
     document_id: str,
     request: ProcessDocumentRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    document = get_document_or_404(document_id)
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     if document["status"] in {
         "enqueueing",
@@ -117,7 +125,10 @@ async def process_document(
     )
 
     if not started:
-        current_document = get_document_or_404(document_id)
+        current_document = get_document_for_user_or_404(
+            document_id,
+            current_user.user_id,
+        )
 
         return {
             "documentId": document_id,
@@ -171,7 +182,16 @@ async def process_document(
 
 
 @router.get("/{document_id}/images/{image_id}.png")
-async def get_document_image_preview(document_id: str, image_id: str):
+async def get_document_image_preview(
+    document_id: str,
+    image_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
+
     key = preview_image_key(
         document_id,
         image_id,
@@ -198,20 +218,38 @@ async def get_document_image_preview(document_id: str, image_id: str):
 
 
 @router.get("/{document_id}/status")
-async def get_document_status(document_id: str):
-    return get_document_or_404(document_id)
+async def get_document_status(
+    document_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    return get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
 
 @router.get("/{document_id}/workflow")
-async def get_document_workflow(document_id: str):
-    document = get_document_or_404(document_id)
+async def get_document_workflow(
+    document_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     return build_workflow_response(document)
 
 
 @router.post("/{document_id}/warning/acknowledge")
-async def acknowledge_document_warning(document_id: str):
-    document = get_document_or_404(document_id)
+async def acknowledge_document_warning(
+    document_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     acknowledged_at = datetime.now(timezone.utc)
 
@@ -226,8 +264,14 @@ async def acknowledge_document_warning(document_id: str):
 
 
 @router.post("/{document_id}/abandon")
-async def abandon_document(document_id: str):
-    document = get_document_or_404(document_id)
+async def abandon_document(
+    document_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     abandoned = try_abandon_document_processing(
         document_id=document_id,

@@ -8,6 +8,17 @@ class Document(Base):
     __tablename__ = "documents"
 
     document_id = Column(String, primary_key=True)
+
+    owner_user_id = Column(
+        String,
+        ForeignKey(
+            "users.user_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        index=True,
+    )
+
     filename = Column(String, nullable=False)
     status = Column(String, nullable=False)
     document_type = Column(String, nullable=False, default="unidentified")
@@ -61,6 +72,11 @@ class Document(Base):
 
     processing_started_at = Column(DateTime(timezone=True), nullable=True)
     processing_completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    ready_notification_sent_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     redaction_started_at = Column(DateTime(timezone=True), nullable=True)
     redaction_completed_at = Column(DateTime(timezone=True), nullable=True)

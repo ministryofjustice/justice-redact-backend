@@ -6,6 +6,13 @@ from app.models.redaction_models import (
     ApplyRedactionsRequest,
     SaveRedactionDecisionsRequest,
 )
+from app.services.auth_service import AuthenticatedUser
+
+
+CURRENT_USER = AuthenticatedUser(
+    user_id="user-123",
+    email="user@justice.gov.uk",
+)
 
 
 @pytest.mark.anyio
@@ -14,8 +21,8 @@ async def test_get_redaction_decisions_returns_revision_state(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {"documentId": document_id},
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {"documentId": document_id},
     )
 
     monkeypatch.setattr(
@@ -30,7 +37,10 @@ async def test_get_redaction_decisions_returns_revision_state(
         raising=False,
     )
 
-    response = await redactions.get_document_redaction_decisions("document-123")
+    response = await redactions.get_document_redaction_decisions(
+        "document-123",
+        current_user=CURRENT_USER,
+    )
 
     assert response == {
         "documentId": "document-123",
@@ -46,8 +56,8 @@ async def test_save_redaction_decisions_returns_new_revision(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {"documentId": document_id},
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {"documentId": document_id},
     )
 
     monkeypatch.setattr(
@@ -69,6 +79,7 @@ async def test_save_redaction_decisions_returns_new_revision(
     response = await redactions.save_document_redaction_decisions(
         "document-123",
         request,
+        current_user=CURRENT_USER,
     )
 
     assert response == {
@@ -84,8 +95,8 @@ async def test_save_redaction_decisions_rejects_stale_revision(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {"documentId": document_id},
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {"documentId": document_id},
     )
 
     monkeypatch.setattr(
@@ -108,6 +119,7 @@ async def test_save_redaction_decisions_rejects_stale_revision(
         await redactions.save_document_redaction_decisions(
             "document-123",
             request,
+            current_user=CURRENT_USER,
         )
 
     assert exc_info.value.status_code == 409
@@ -119,8 +131,8 @@ async def test_apply_redactions_queues_redaction_run(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
             "documentId": document_id,
         },
     )
@@ -174,6 +186,7 @@ async def test_apply_redactions_queues_redaction_run(
     response = await redactions.apply_redactions(
         document_id="document-123",
         request=request,
+        current_user=CURRENT_USER,
     )
 
     assert response["documentId"] == "document-123"
@@ -190,8 +203,8 @@ async def test_apply_redactions_returns_503_when_sqs_enqueue_fails(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
             "documentId": document_id,
         },
     )
@@ -244,6 +257,7 @@ async def test_apply_redactions_returns_503_when_sqs_enqueue_fails(
         await redactions.apply_redactions(
             document_id="document-123",
             request=request,
+            current_user=CURRENT_USER,
         )
 
     assert exc_info.value.status_code == 503
@@ -257,8 +271,8 @@ async def test_apply_redactions_returns_409_when_run_is_superseded_during_enqueu
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
             "documentId": document_id,
         },
     )
@@ -306,6 +320,7 @@ async def test_apply_redactions_returns_409_when_run_is_superseded_during_enqueu
         await redactions.apply_redactions(
             document_id="document-123",
             request=request,
+            current_user=CURRENT_USER,
         )
 
     assert exc_info.value.status_code == 409
@@ -317,8 +332,8 @@ async def test_get_redaction_run_status_returns_progress(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
             "documentId": document_id,
         },
     )
@@ -337,6 +352,7 @@ async def test_get_redaction_run_status_returns_progress(
     response = await redactions.get_redaction_run_status(
         document_id="document-123",
         run_id="run-123",
+        current_user=CURRENT_USER,
     )
 
     assert response == {
@@ -353,8 +369,8 @@ async def test_get_redaction_run_status_returns_superseded_run_state(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
             "documentId": document_id,
             "currentRedactionRunId": "run-new",
         },
@@ -374,6 +390,7 @@ async def test_get_redaction_run_status_returns_superseded_run_state(
     response = await redactions.get_redaction_run_status(
         document_id="document-123",
         run_id="run-old",
+        current_user=CURRENT_USER,
     )
 
     assert response == {
@@ -390,8 +407,8 @@ async def test_get_redaction_run_status_returns_404_for_wrong_document(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
             "documentId": document_id,
         },
     )
@@ -411,6 +428,7 @@ async def test_get_redaction_run_status_returns_404_for_wrong_document(
         await redactions.get_redaction_run_status(
             document_id="document-123",
             run_id="run-123",
+            current_user=CURRENT_USER,
         )
 
     assert exc_info.value.status_code == 404
@@ -423,8 +441,8 @@ async def test_cancel_redactions_cancels_current_run(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
             "documentId": document_id,
         },
     )
@@ -444,6 +462,7 @@ async def test_cancel_redactions_cancels_current_run(
     response = await redactions.cancel_redactions(
         document_id="document-123",
         run_id="run-123",
+        current_user=CURRENT_USER,
     )
 
     assert response == {
@@ -464,8 +483,8 @@ async def test_cancel_redactions_returns_409_for_non_current_run(
 ):
     monkeypatch.setattr(
         redactions,
-        "get_document_or_404",
-        lambda document_id: {
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
             "documentId": document_id,
         },
     )
@@ -480,6 +499,60 @@ async def test_cancel_redactions_returns_409_for_non_current_run(
         await redactions.cancel_redactions(
             document_id="document-123",
             run_id="old-run",
+            current_user=CURRENT_USER,
         )
 
     assert exc_info.value.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_save_redaction_decisions_checks_ownership_before_write(
+    monkeypatch,
+):
+    def reject_document(
+        document_id,
+        user_id,
+    ):
+        raise redactions.HTTPException(
+            status_code=404,
+            detail="Document not found",
+        )
+
+    monkeypatch.setattr(
+        redactions,
+        "get_document_for_user_or_404",
+        reject_document,
+    )
+
+    save_called = False
+
+    def fake_save_redaction_decisions(**kwargs):
+        nonlocal save_called
+        save_called = True
+
+        return {
+            "saved": True,
+            "revision": 1,
+        }
+
+    monkeypatch.setattr(
+        redactions,
+        "save_redaction_decisions",
+        fake_save_redaction_decisions,
+    )
+
+    request = redactions.SaveRedactionDecisionsRequest(
+        documentId="document-123",
+        decisions=[],
+        expectedRevision=0,
+    )
+
+    with pytest.raises(redactions.HTTPException) as exc_info:
+        await redactions.save_document_redaction_decisions(
+            "document-123",
+            request,
+            current_user=CURRENT_USER,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert save_called is False

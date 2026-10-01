@@ -4,8 +4,10 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import threading
 import signal
+from urllib.parse import quote
 
 from app.logging_config import configure_logging, logger
+from app.core.settings import settings
 from app.services.document_processing_service import (
     DocumentProcessingCancelled,
     process_document_pipeline,
@@ -18,6 +20,11 @@ from app.services.document_store import (
     is_document_processing_owner,
     renew_document_processing_lease,
     try_claim_document_processing,
+    get_pending_ready_notification,
+    mark_ready_notification_sent,
+)
+from app.services.notify_service import (
+    send_document_ready_email,
 )
 from app.services.sqs_service import (
     delete_document_processing_message,
@@ -107,6 +114,68 @@ def run_processing_heartbeat(
         )
 
 
+def send_ready_notification_if_pending(
+    document_id: str,
+) -> bool:
+    notification = get_pending_ready_notification(
+        document_id,
+    )
+
+    if notification is None:
+        return True
+
+    frontend_base_url = settings.auth_frontend_base_url.rstrip("/")
+
+    document_link = (
+        f"{frontend_base_url}/review?documentId=" f"{quote(document_id, safe='')}"
+    )
+
+    try:
+        notification_id = send_document_ready_email(
+            email=notification["email"],
+            filename=notification["filename"],
+            document_link=document_link,
+        )
+
+        marked = mark_ready_notification_sent(
+            document_id=document_id,
+            sent_at=datetime.now(timezone.utc),
+        )
+
+        if not marked:
+            logger.warning(
+                "document_ready_notification_not_marked",
+                extra={
+                    "event": ("document_ready_notification_not_marked"),
+                    "document_id": document_id,
+                    "notification_id": notification_id,
+                },
+            )
+
+        logger.info(
+            "document_ready_notification_sent",
+            extra={
+                "event": ("document_ready_notification_sent"),
+                "document_id": document_id,
+                "notification_id": notification_id,
+            },
+        )
+
+        return True
+
+    except Exception as exc:
+        logger.error(
+            "document_ready_notification_failed",
+            extra={
+                "event": ("document_ready_notification_failed"),
+                "document_id": document_id,
+                "error_type": type(exc).__name__,
+            },
+        )
+
+        return False
+
+
 def process_sqs_message(message: dict) -> None:
     receipt_handle = message.get("ReceiptHandle")
     body = message.get("Body")
@@ -162,6 +231,13 @@ def process_sqs_message(message: dict) -> None:
         return
 
     if document["status"] == "ready_for_review":
+        notification_sent = send_ready_notification_if_pending(
+            parsed.document_id,
+        )
+
+        if not notification_sent:
+            return
+
         logger.info(
             "document_processing_message_discarded",
             extra={
@@ -240,6 +316,13 @@ def process_sqs_message(message: dict) -> None:
                 claim_id=claim_id,
             ),
         )
+
+        notification_sent = send_ready_notification_if_pending(
+            parsed.document_id,
+        )
+
+        if not notification_sent:
+            return
 
         delete_document_processing_message(
             receipt_handle=receipt_handle,

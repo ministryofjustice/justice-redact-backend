@@ -1,9 +1,20 @@
 from fastapi import HTTPException
-from datetime import datetime, timezone
-from sqlalchemy import and_, case, or_, update
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import and_, case, or_, select, update
 
 from app.core.database import SessionLocal
 from app.models.document import Document
+from app.models.user import User
+
+
+DOCUMENT_RESUME_LIFETIME = timedelta(days=30)
+
+
+def _normalise_to_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+
+    return value.astimezone(timezone.utc)
 
 
 def document_to_dict(document: Document) -> dict:
@@ -62,6 +73,7 @@ def document_to_dict(document: Document) -> dict:
 
 def create_document_record(
     document_id: str,
+    owner_user_id: str,
     filename: str,
     document_type: str,
     warning_reason: str | None = None,
@@ -69,6 +81,7 @@ def create_document_record(
     with SessionLocal() as session:
         document = Document(
             document_id=document_id,
+            owner_user_id=owner_user_id,
             filename=filename,
             status="uploaded",
             document_type=document_type,
@@ -102,6 +115,108 @@ def get_document_or_404(document_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Document not found")
 
     return document
+
+
+def get_document_for_user_or_404(
+    document_id: str,
+    user_id: str,
+) -> dict:
+    """
+    Return a document only when it belongs to the authenticated user.
+
+    A document owned by another user is deliberately indistinguishable
+    from a document that does not exist. This prevents document-ID
+    enumeration from revealing another user's records.
+    """
+
+    with SessionLocal() as session:
+        document = session.execute(
+            select(Document).where(
+                Document.document_id == document_id,
+                Document.owner_user_id == user_id,
+            )
+        ).scalar_one_or_none()
+
+        if document is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Document not found",
+            )
+
+        created_at = _normalise_to_utc(document.created_at)
+        expires_at = created_at + DOCUMENT_RESUME_LIFETIME
+
+        if datetime.now(timezone.utc) >= expires_at:
+            raise HTTPException(
+                status_code=410,
+                detail="Document link expired",
+            )
+
+        return document_to_dict(document)
+
+
+def get_pending_ready_notification(
+    document_id: str,
+) -> dict | None:
+    """
+    Return the document owner's email only when the document is ready for
+    review and its ready notification has not already been recorded as sent.
+    """
+
+    with SessionLocal() as session:
+        row = session.execute(
+            select(
+                User.email,
+                Document.filename,
+            )
+            .join(
+                Document,
+                Document.owner_user_id == User.user_id,
+            )
+            .where(
+                Document.document_id == document_id,
+                Document.status == "ready_for_review",
+                Document.ready_notification_sent_at.is_(None),
+            )
+        ).one_or_none()
+
+        if row is None:
+            return None
+
+        return {
+            "email": row.email,
+            "filename": row.filename,
+        }
+
+
+def mark_ready_notification_sent(
+    *,
+    document_id: str,
+    sent_at: datetime,
+) -> bool:
+    """
+    Record that the ready-for-review email has been sent.
+
+    The conditional update means an already-recorded notification is not
+    overwritten by a later worker retry.
+    """
+
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.status == "ready_for_review",
+                Document.ready_notification_sent_at.is_(None),
+            )
+            .values(
+                ready_notification_sent_at=sent_at,
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
 
 
 def update_document_record(

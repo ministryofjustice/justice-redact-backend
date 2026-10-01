@@ -107,12 +107,36 @@ spec:
                   name: rds-postgresql-instance-output
                   key: database_password
 
+            - name: NOTIFY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ${NAMESPACE}-notify
+                  key: api_key
+
+            - name: NOTIFY_DOCUMENT_READY_TEMPLATE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ${NAMESPACE}-notify
+                  key: document_ready_template_id
+
+            - name: AUTH_FRONTEND_BASE_URL
+              value: "https://${NAMESPACE}.apps.live.cloud-platform.service.justice.gov.uk"
+
             - name: AP_COMPREHEND_ROLE_ARN
               value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
 
         - name: fluent-bit
           image: fluent/fluent-bit:3.1
           imagePullPolicy: Always
+
+          livenessProbe:
+            httpGet:
+              path: /api/v1/uptime
+              port: 2020
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
 
           env:
             - name: OPENSEARCH_PROXY_HOST
@@ -143,7 +167,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
-            runAsUser: 1000
+            runAsUser: 10001
             readOnlyRootFilesystem: true
             capabilities:
               drop:
