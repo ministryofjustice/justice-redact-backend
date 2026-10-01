@@ -108,7 +108,8 @@ jobs:
           envsubst < deployments/templates/worker-hpa.yml > k8s/app/worker-hpa.yml
           envsubst < deployments/templates/redaction-worker-deployment.yml > k8s/app/redaction-worker-deployment.yml
           envsubst < deployments/templates/redaction-worker-hpa.yml > k8s/app/redaction-worker-hpa.yml
-          
+
+          envsubst '$NAMESPACE' < deployments/templates/fluent-bit-configmap.yml > k8s/app/fluent-bit-configmap.yml
           envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
 
           # Analytical Platform data extractor — dev only until the
