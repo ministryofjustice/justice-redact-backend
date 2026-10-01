@@ -99,7 +99,7 @@ jobs:
             export INGRESS_CLASS="default-non-prod"
           fi
 
-          envsubst < deployments/templates/deployment.yml > k8s/app/deployment.yml
+                    envsubst < deployments/templates/deployment.yml > k8s/app/deployment.yml
           envsubst < deployments/templates/worker-deployment.yml > k8s/app/worker-deployment.yml
           envsubst < deployments/templates/service.yml > k8s/app/service.yml
           envsubst < deployments/templates/ingress.yml > k8s/app/ingress.yml
@@ -108,9 +108,10 @@ jobs:
           envsubst < deployments/templates/worker-hpa.yml > k8s/app/worker-hpa.yml
           envsubst < deployments/templates/redaction-worker-deployment.yml > k8s/app/redaction-worker-deployment.yml
           envsubst < deployments/templates/redaction-worker-hpa.yml > k8s/app/redaction-worker-hpa.yml
-          
-          envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
 
+          envsubst '$NAMESPACE' < deployments/templates/fluent-bit-configmap.yml > k8s/app/fluent-bit-configmap.yml
+          envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
+          
           # Analytical Platform data extractor — dev only until the
           # analytical-platform-reporting-s3-bucket secret exists in staging/prod
           if [ "${ENVIRONMENT}" = "dev" ]; then
