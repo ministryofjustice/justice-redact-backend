@@ -10,7 +10,6 @@ def get_env_variable(name):
     return val
 
 def main():
-    # 1. Load configuration from environment variables injected by Kubernetes secrets
     pghost = get_env_variable("PGHOST")
     pgdatabase = get_env_variable("PGDATABASE")
     pguser = get_env_variable("PGUSER")
@@ -20,22 +19,21 @@ def main():
 
     print(f"Connecting to database {pgdatabase} at {pghost}...")
 
-    # 2. Connect to PostgreSQL using Psycopg 3
     conn_info = f"host={pghost} dbname={pgdatabase} user={pguser} password={pgpassword} port=5432"
-    
     s3_client = boto3.client("s3", region_name=aws_region)
 
-    # Parse bucket and prefix from S3_DESTINATION (e.g., s3://bucket-name/path/)
+    # Safely parse bucket and clean prefix from S3_DESTINATION, avoiding double slashes
     if s3_destination.startswith("s3://"):
         s3_path_no_scheme = s3_destination[5:]
-        bucket_name, *prefix_parts = s3_path_no_scheme.split("/")
-        s3_prefix = "/".join(prefix_parts)
+        parts = s3_path_no_scheme.split("/", 1)
+        bucket_name = parts[0]
+        s3_prefix = parts[1].strip("/") if len(parts) > 1 and parts[1] else ""
     else:
         raise ValueError("S3_DESTINATION must start with 's3://'")
 
     with psycopg.connect(conn_info) as conn:
         with conn.cursor() as cur:
-            # Fetch all user tables in the public schema
+            # Fetch all user tables explicitly in the public schema
             cur.execute("""
                 SELECT table_name 
                 FROM information_schema.tables 
@@ -48,27 +46,23 @@ def main():
                 print(f"Extracting table: {table}...")
                 jsonl_data = []
                 
-                # Stream rows safely in small batch chunks (10 rows) to protect memory
-                cur.execute(f"SELECT * FROM {table};")
+                # Explicitly qualify table schema to prevent ambiguity errors
+                cur.execute(f"SELECT * FROM public.{table};")
                 
+                # Use a safe batch chunk size of 20 rows to prevent OOM spikes
                 while True:
-                    rows = cur.fetchmany(10) # Batch chunk size of 10 rows
+                    rows = cur.fetchmany(20)
                     if not rows:
                         break
                     
                     colnames = [desc[0] for desc in cur.description]
                     for row in rows:
                         row_dict = dict(zip(colnames, row))
-                        # Handle non-serializable types if any (like dates/UUIDs) by converting to string
-                        for k, v in row_dict.items():
-                            if v is not None and not isinstance(v, (int, float, bool, str)):
-                                row_dict[k] = str(v)
-                        jsonl_data.append(json.dumps(row_dict))
+                        jsonl_data.append(json.dumps(row_dict, default=str))
 
-                # Compile into JSON lines format
                 jsonl_content = "\n".join(jsonl_data)
                 
-                # Upload snapshot to S3 landing bucket
+                # Construct clean S3 key without double slashes
                 s3_key = f"{s3_prefix}/{table}_snapshot.jsonl" if s3_prefix else f"{table}_snapshot.jsonl"
                 print(f"Uploading {table} snapshot to s3://{bucket_name}/{s3_key}...")
                 
