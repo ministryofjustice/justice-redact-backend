@@ -85,6 +85,7 @@ from botocore.exceptions import ClientError
 
 def main():
     destination = os.environ["S3_BUCKET_NAME"]
+
     region = os.getenv("AWS_DEFAULT_REGION", "eu-west-2")
 
     if not destination.startswith("s3://"):
