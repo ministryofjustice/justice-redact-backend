@@ -84,11 +84,11 @@ from botocore.exceptions import ClientError
 
 
 def main():
-    destination = os.environ["S3_DESTINATION"]
+    destination = os.environ["S3_BUCKET_NAME"]
     region = os.getenv("AWS_DEFAULT_REGION", "eu-west-2")
 
     if not destination.startswith("s3://"):
-        raise ValueError("S3_DESTINATION must start with s3://")
+        raise ValueError("S3_BUCKET_NAME must start with s3://")
 
     bucket, _, prefix = destination[5:].partition("/")
     key = f"{prefix.strip('/')}/access-test-{uuid.uuid4().hex}.txt".lstrip("/")
