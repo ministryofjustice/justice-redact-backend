@@ -112,9 +112,9 @@ jobs:
           envsubst '$NAMESPACE' < deployments/templates/fluent-bit-configmap.yml > k8s/app/fluent-bit-configmap.yml
           envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
 
-          # Analytical Platform data extractor — dev only until the
-          # analytical-platform-reporting-s3-bucket secret exists in staging/prod
-          if [ "${ENVIRONMENT}" = "dev" ]; then
+          # Analytical Platform data extractor — enabled for dev and staging.
+          # Production remains disabled until its AP data-export configuration is provisioned.
+          if [ "${ENVIRONMENT}" = "dev" ] || [ "${ENVIRONMENT}" = "staging" ]; then
             envsubst < deployments/templates/data-extractor-job.yml > k8s/app/data-extractor-job.yml
           fi
           
