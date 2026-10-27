@@ -7,13 +7,10 @@ metadata:
     app: justice-redact-data-extractor
 
 spec:
-  # Daily export to the Register My Data landing bucket (01:00).
   schedule: "0 1 * * *"
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid
-
-  # Count a run as missed if the Job can't be created within this 2 minute window.
   startingDeadlineSeconds: 120
 
   jobTemplate:
@@ -27,27 +24,21 @@ spec:
 
         spec:
           restartPolicy: Never
-
-          # Apply the restricted-compatible seccomp profile to all pod containers.
           securityContext:
             seccompProfile:
               type: RuntimeDefault
 
-          # Same IRSA service account as the backend (kept for consistency; the
-          # extractor itself authenticates to S3 with the static keys below).
           serviceAccountName: ${SERVICE_ACCOUNT}
 
           containers:
             - name: data-extractor
-              # Pinned image, as used in the Cloud Platform guide's example job.
-              image: ministryofjustice/data-engineering-data-extractor:v1
+              # REPLACED: Use your own built ECR image instead of the deprecated external dependency
+              image: ${IMAGE}
               imagePullPolicy: Always
 
-              # Extract table names, dump each table to JSON lines, then copy to S3.
-              args: ["extract_table_names.py && extract_pg_jsonl_snapshot.py && transfer_local_to_s3.sh"]
+              # Run your custom internal extraction script
+              command: ["python", "app/cli/data_extractor.py"]
 
-              # Restricted, non-root. readOnlyRootFilesystem is left off because the
-              # extractor writes its dump files locally before uploading — see notes.
               securityContext:
                 allowPrivilegeEscalation: false
                 runAsNonRoot: true
@@ -57,25 +48,22 @@ spec:
                     - ALL
 
               volumeMounts:
-                # The extractor writes events.log and its local snapshot files
-                # under /db-exporter before uploading to S3 — give it somewhere
-                # writable rather than loosening the rest of the security context.
                 - name: tmp
                   mountPath: /db-exporter
 
               resources:
                 requests:
-                  cpu: 500m
-                  memory: 1Gi
+                  cpu: 250m
+                  memory: 512Mi
                 limits:
-                  cpu: "2"
-                  memory: 6Gi
+                  cpu: "1"
+                  memory: 2Gi
 
               env:
                 - name: PYTHONUNBUFFERED
                   value: "1"
 
-                # --- PostgreSQL connection (source: rds-postgresql-instance-output) ---
+                # --- PostgreSQL connection ---
                 - name: PGHOST
                   valueFrom:
                     secretKeyRef:
@@ -100,32 +88,21 @@ spec:
                       name: rds-postgresql-instance-output
                       key: database_password
 
-                # --- S3 destination (source: analytical-platform-reporting-s3-bucket) ---
+                # --- S3 destination ---
                 - name: S3_DESTINATION
                   valueFrom:
-                    secretKeyRef:
-                      name: analytical-platform-reporting-s3-bucket
+                    configMapKeyRef:
+                      name: analytical-platform-data-export
                       key: destination_bucket
-
-                - name: AWS_ACCESS_KEY_ID
+                
+                - name: AP_S3_ROLE_ARN
                   valueFrom:
-                    secretKeyRef:
-                      name: analytical-platform-reporting-s3-bucket
-                      key: access_key_id
-
-                - name: AWS_SECRET_ACCESS_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: analytical-platform-reporting-s3-bucket
-                      key: secret_access_key
+                    configMapKeyRef:
+                      name: analytical-platform-data-export
+                      key: ap_s3_role_arn
 
                 - name: AWS_DEFAULT_REGION
-                  value: eu-west-2
-
-                # Set in the guide's example job. Not confirmed what it does for your
-                # service — check the extractor README before enabling.
-                # - name: SAVE_EVENTS_LOG
-                #   value: "true"
+                  value: "eu-west-2"
 
           volumes:
             - name: tmp
