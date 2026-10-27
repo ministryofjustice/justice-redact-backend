@@ -85,16 +85,33 @@ from botocore.exceptions import ClientError
 
 def main():
     destination = os.environ["S3_DESTINATION"]
+    role_arn = os.environ["AP_S3_ROLE_ARN"]
 
     region = os.getenv("AWS_DEFAULT_REGION", "eu-west-2")
 
     if not destination.startswith("s3://"):
-        raise ValueError("S3_BUCKET_NAME must start with s3://")
+        raise ValueError("S3_DESTINATION must start with s3://")
 
     bucket, _, prefix = destination[5:].partition("/")
     key = f"{prefix.strip('/')}/access-test-{uuid.uuid4().hex}.txt".lstrip("/")
 
-    s3 = boto3.client("s3", region_name=region)
+    print(f"Assuming Analytical Platform S3 role: {role_arn}")
+
+    sts = boto3.client("sts", region_name=region)
+    assumed_role = sts.assume_role(
+        RoleArn=role_arn,
+        RoleSessionName="justice-redact-data-extractor",
+    )
+
+    credentials = assumed_role["Credentials"]
+
+    s3 = boto3.client(
+        "s3",
+        region_name=region,
+        aws_access_key_id=credentials["AccessKeyId"],
+        aws_secret_access_key=credentials["SecretAccessKey"],
+        aws_session_token=credentials["SessionToken"],
+    )
     content = b"S3 access test"
 
     print(f"Testing S3 access: s3://{bucket}/{key}")
