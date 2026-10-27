@@ -95,17 +95,8 @@ spec:
                       name: analytical-platform-reporting-s3-bucket
                       key: destination_bucket
 
-                - name: AWS_ACCESS_KEY_ID
-                  valueFrom:
-                    secretKeyRef:
-                      name: analytical-platform-reporting-s3-bucket
-                      key: access_key_id
-
-                - name: AWS_SECRET_ACCESS_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: analytical-platform-reporting-s3-bucket
-                      key: secret_access_key
+                - name: AP_S3_ROLE_ARN
+                  value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
 
                 - name: AWS_DEFAULT_REGION
                   value: "eu-west-2"
