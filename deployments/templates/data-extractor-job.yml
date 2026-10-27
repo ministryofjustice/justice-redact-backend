@@ -91,12 +91,15 @@ spec:
                 # --- S3 destination ---
                 - name: S3_DESTINATION
                   valueFrom:
-                    secretKeyRef:
-                      name: analytical-platform-reporting-s3-bucket
+                    configMapKeyRef:
+                      name: analytical-platform-data-export
                       key: destination_bucket
-
+                
                 - name: AP_S3_ROLE_ARN
-                  value: "arn:aws:iam::593291632749:role/alpha_app_justice-redact-backend"
+                  valueFrom:
+                    configMapKeyRef:
+                      name: analytical-platform-data-export
+                      key: ap_s3_role_arn
 
                 - name: AWS_DEFAULT_REGION
                   value: "eu-west-2"
