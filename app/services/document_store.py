@@ -556,3 +556,72 @@ def try_abandon_document_processing(
         session.commit()
 
         return result.rowcount == 1
+
+
+
+def request_processing_return_to_subject_details(
+    *,
+    document_id: str,
+) -> str:
+    """
+    Request non-destructive processing cancellation.
+
+    Returns:
+        "subject-details": The document is editable.
+        "cancelling": A running worker must stop first.
+        "review": Processing completed before cancellation.
+        "conflict": The document is in another workflow state.
+        "not_found": The document does not exist.
+
+    Does not remove the original PDF or generated S3 objects.
+    """
+    with SessionLocal() as session:
+        document = session.get(
+            Document,
+            document_id,
+            with_for_update=True,
+        )
+
+        if document is None:
+            return "not_found"
+
+        if document.status == "ready_for_review":
+            return "review"
+
+        if document.status == "cancelling":
+            return "cancelling"
+
+        if document.status == "processing":
+            if not document.processing_job_id:
+                return "conflict"
+
+            document.status = "cancelling"
+            session.commit()
+            return "cancelling"
+
+        if document.status in {
+            "uploaded",
+            "enqueue_failed",
+            "enqueueing",
+            "queued",
+            "retrying",
+            "failed",
+        }:
+            document.status = "uploaded"
+
+            # Invalidate any queued or retryable job.
+            document.processing_job_id = None
+            document.processing_claim_id = None
+            document.processing_lease_expires_at = None
+            document.processing_progress = 0
+            document.processing_attempt_count = 0
+            document.processing_started_at = None
+            document.processing_completed_at = None
+            document.error_message = None
+
+            # Preserve subject details, original upload,
+            # document identity, ownership and warning state.
+            session.commit()
+            return "subject-details"
+
+        return "conflict"

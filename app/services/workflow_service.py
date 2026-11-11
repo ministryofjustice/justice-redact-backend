@@ -35,6 +35,7 @@ def resolve_workflow_navigation(
         "enqueueing",
         "queued",
         "processing",
+        "cancelling",
         "retrying",
         "failed",
     }:

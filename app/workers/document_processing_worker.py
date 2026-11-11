@@ -339,18 +339,25 @@ def process_sqs_message(message: dict) -> None:
         )
 
     except DocumentProcessingCancelled:
-        try:
-            delete_s3_prefix(document_prefix(parsed.document_id))
-        except Exception as exc:
-            logger.error(
-                "document_processing_cancel_cleanup_failed",
-                extra={
-                    "event": "document_processing_cancel_cleanup_failed",
-                    "document_id": parsed.document_id,
-                    "job_id": parsed.job_id,
-                    "error_type": type(exc).__name__,
-                },
-            )
+        # A processing job may lose ownership without the
+        # document being abandoned (for example, when a user
+        # returns to Subject details). Preserve the original
+        # upload and any newer job's outputs in that case.
+        current_document = get_document(parsed.document_id)
+
+        if current_document and current_document["status"] == "abandoned":
+            try:
+                delete_s3_prefix(document_prefix(parsed.document_id))
+            except Exception as exc:
+                logger.error(
+                    "document_processing_cancel_cleanup_failed",
+                    extra={
+                        "event": "document_processing_cancel_cleanup_failed",
+                        "document_id": parsed.document_id,
+                        "job_id": parsed.job_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
 
         delete_document_processing_message(
             receipt_handle=receipt_handle,

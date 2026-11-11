@@ -17,7 +17,7 @@ class FakeThread:
         pass
 
 
-def test_cancelled_processing_is_cleaned_up_and_not_marked_failed(
+def test_cancelled_processing_preserves_files_and_is_not_marked_failed(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -91,9 +91,9 @@ def test_cancelled_processing_is_cleaned_up_and_not_marked_failed(
         }
     )
 
-    assert deleted_prefixes == [
-        "documents/document-123/",
-    ]
+    # Cancellation without abandonment must preserve the
+    # original uploaded PDF and other document files.
+    assert deleted_prefixes == []
     assert deleted_messages == ["receipt-123"]
     assert failed_attempts == []
 
@@ -495,3 +495,101 @@ def test_send_ready_notification_returns_false_when_notify_fails(
 
     assert result is False
     assert marked == []
+
+
+def test_cancelled_abandoned_processing_still_cleans_up_document(
+    monkeypatch,
+):
+    document_reads = 0
+
+    def get_document_with_abandonment(document_id):
+        nonlocal document_reads
+        document_reads += 1
+
+        return {
+            "documentId": document_id,
+            "status": (
+                "queued"
+                if document_reads == 1
+                else "abandoned"
+            ),
+            "documentType": "nomis",
+            "processingJobId": "job-123",
+        }
+
+    monkeypatch.setattr(
+        worker,
+        "get_document",
+        get_document_with_abandonment,
+    )
+
+    monkeypatch.setattr(
+        worker,
+        "try_claim_document_processing",
+        lambda **kwargs: True,
+    )
+
+    monkeypatch.setattr(
+        worker.threading,
+        "Thread",
+        FakeThread,
+    )
+
+    def cancel_pipeline(*args, **kwargs):
+        raise DocumentProcessingCancelled()
+
+    monkeypatch.setattr(
+        worker,
+        "process_document_pipeline",
+        cancel_pipeline,
+    )
+
+    deleted_prefixes = []
+    deleted_messages = []
+    failed_attempts = []
+
+    monkeypatch.setattr(
+        worker,
+        "delete_s3_prefix",
+        lambda prefix: deleted_prefixes.append(prefix),
+    )
+
+    monkeypatch.setattr(
+        worker,
+        "delete_document_processing_message",
+        lambda *, receipt_handle: deleted_messages.append(
+            receipt_handle
+        ),
+    )
+
+    monkeypatch.setattr(
+        worker,
+        "fail_document_processing_attempt",
+        lambda **kwargs: failed_attempts.append(kwargs),
+    )
+
+    worker.process_sqs_message(
+        {
+            "ReceiptHandle": "receipt-123",
+            "Body": json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "jobType": "document_processing",
+                    "jobId": "job-123",
+                    "documentId": "document-123",
+                }
+            ),
+            "Attributes": {
+                "ApproximateReceiveCount": "1",
+            },
+        }
+    )
+
+    assert document_reads >= 2
+
+    assert deleted_prefixes == [
+        "documents/document-123/",
+    ]
+
+    assert deleted_messages == ["receipt-123"]
+    assert failed_attempts == []
