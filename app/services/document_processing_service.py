@@ -927,6 +927,10 @@ def process_document_pipeline(
             "documentId": document_id,
             "filename": document["filename"],
             "status": "ready_for_review",
+            "processingAssets": {
+                "layout": "job",
+                "jobId": job_id,
+            },
         }
 
         assert_processing_active(is_processing_active)
