@@ -617,3 +617,30 @@ def request_processing_return_to_subject_details(
             return "subject-details"
 
         return "conflict"
+
+
+
+def mark_document_processing_enqueue_failed(
+    *,
+    document_id: str,
+    job_id: str,
+) -> bool:
+    """
+    Record an enqueue failure only if this job still owns
+    the document's enqueueing state.
+    """
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.processing_job_id == job_id,
+                Document.status == "enqueueing",
+            )
+            .values(
+                status="enqueue_failed",
+            )
+        )
+
+        session.commit()
+        return result.rowcount == 1

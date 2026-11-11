@@ -8,6 +8,7 @@ from app.services.document_store import (
     get_document_for_user_or_404,
     update_document_record,
     mark_document_processing_queued,
+    mark_document_processing_enqueue_failed,
     try_start_document_processing_enqueue,
 )
 from app.services.file_store import save_upload_file
@@ -155,20 +156,40 @@ async def process_document(
             },
         )
 
-        update_document_record(
-            document_id,
-            status="enqueue_failed",
+        failed = mark_document_processing_enqueue_failed(
+            document_id=document_id,
+            job_id=job_id,
         )
+
+        if not failed:
+            current_document = get_document_for_user_or_404(
+                document_id,
+                current_user.user_id,
+            )
+            return {
+                "documentId": document_id,
+                "status": current_document["status"],
+            }
 
         raise HTTPException(
             status_code=503,
             detail="The document could not be queued for processing",
         )
 
-    mark_document_processing_queued(
+    queued = mark_document_processing_queued(
         document_id=document_id,
         job_id=job_id,
     )
+
+    if not queued:
+        current_document = get_document_for_user_or_404(
+            document_id,
+            current_user.user_id,
+        )
+        return {
+            "documentId": document_id,
+            "status": current_document["status"],
+        }
 
     logger.info(
         "document_processing_queued",
