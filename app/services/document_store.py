@@ -568,7 +568,6 @@ def request_processing_return_to_subject_details(
 
     Returns:
         "subject-details": The document is editable.
-        "cancelling": A running worker must stop first.
         "review": Processing completed before cancellation.
         "conflict": The document is in another workflow state.
         "not_found": The document does not exist.
@@ -588,22 +587,15 @@ def request_processing_return_to_subject_details(
         if document.status == "ready_for_review":
             return "review"
 
-        if document.status == "cancelling":
-            return "cancelling"
-
-        if document.status == "processing":
-            if not document.processing_job_id:
-                return "conflict"
-
-            document.status = "cancelling"
-            session.commit()
-            return "cancelling"
-
+        # Invalidate the old job atomically. Existing workers
+        # lose database ownership, while job-specific S3 keys
+        # isolate their writes from future processing attempts.
         if document.status in {
             "uploaded",
             "enqueue_failed",
             "enqueueing",
             "queued",
+            "processing",
             "retrying",
             "failed",
         }:

@@ -32,6 +32,8 @@ from app.services.review_result_store import get_review_result
 from app.services.s3_keys import (
     document_geometry_chunk_key,
     document_geometry_manifest_key,
+    processing_geometry_chunk_key,
+    processing_geometry_manifest_key,
     original_pdf_key,
     redaction_run_exempt_pdf_key,
     redaction_run_redacted_pdf_key,
@@ -369,6 +371,26 @@ def apply_redactions_for_document(
         document_id,
     )
 
+    # Legacy review results have no processingAssets metadata.
+    # New results identify the job containing their geometry.
+    processing_assets = (
+        review_result.get("processingAssets")
+        if isinstance(review_result, dict)
+        else None
+    )
+
+    if processing_assets is None:
+        geometry_job_id = None
+    elif (
+        isinstance(processing_assets, dict)
+        and processing_assets.get("layout") == "job"
+        and isinstance(processing_assets.get("jobId"), str)
+        and processing_assets["jobId"]
+    ):
+        geometry_job_id = processing_assets["jobId"]
+    else:
+        raise ValueError("Invalid processing asset storage metadata")
+
     ai_findings = (
         review_result.get("findings", []) if isinstance(review_result, dict) else []
     )
@@ -417,11 +439,16 @@ def apply_redactions_for_document(
 
     start = time.perf_counter()
 
-    manifest = download_json_from_s3(
-        document_geometry_manifest_key(
+    manifest_key = (
+        processing_geometry_manifest_key(
             document_id,
-        ),
+            geometry_job_id,
+        )
+        if geometry_job_id is not None
+        else document_geometry_manifest_key(document_id)
     )
+
+    manifest = download_json_from_s3(manifest_key)
 
     print(
         f"[REDACTION_TIMING] "
@@ -483,12 +510,20 @@ def apply_redactions_for_document(
 
         chunk_start = time.perf_counter()
 
-        chunk_geometry = download_json_from_s3(
-            document_geometry_chunk_key(
+        chunk_key = (
+            processing_geometry_chunk_key(
+                document_id,
+                geometry_job_id,
+                chunk_index,
+            )
+            if geometry_job_id is not None
+            else document_geometry_chunk_key(
                 document_id,
                 chunk_index,
-            ),
+            )
         )
+
+        chunk_geometry = download_json_from_s3(chunk_key)
 
         chunk_document = Document.model_validate(
             chunk_geometry,

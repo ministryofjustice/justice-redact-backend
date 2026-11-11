@@ -85,6 +85,14 @@ async def test_image_preview_reads_s3_for_owned_document(
 
     monkeypatch.setattr(
         documents,
+        "get_review_result",
+        lambda document_id: {
+            "documentId": document_id,
+        },
+    )
+
+    monkeypatch.setattr(
+        documents,
         "get_object_from_s3",
         lambda key: b"png-bytes",
     )
@@ -187,3 +195,59 @@ def test_document_status_endpoint_requires_authentication():
     assert response.json() == {
         "detail": "Authentication required",
     }
+
+
+@pytest.mark.anyio
+async def test_image_preview_uses_published_processing_job(
+    monkeypatch,
+):
+    document_id = "document-123"
+    job_id = "job-456"
+    image_id = "image-123"
+
+    monkeypatch.setattr(
+        documents,
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
+            "documentId": document_id,
+        },
+    )
+
+    monkeypatch.setattr(
+        documents,
+        "get_review_result",
+        lambda document_id: {
+            "documentId": document_id,
+            "processingAssets": {
+                "layout": "job",
+                "jobId": job_id,
+            },
+        },
+    )
+
+    requested_keys = []
+
+    def fake_get_object_from_s3(key):
+        requested_keys.append(key)
+        return b"png-bytes"
+
+    monkeypatch.setattr(
+        documents,
+        "get_object_from_s3",
+        fake_get_object_from_s3,
+    )
+
+    response = await documents.get_document_image_preview(
+        document_id,
+        image_id,
+        current_user=CURRENT_USER,
+    )
+
+    assert requested_keys == [
+        "documents/document-123/"
+        "processing-jobs/job-456/"
+        "previews/image-123.png"
+    ]
+
+    assert response.body == b"png-bytes"
+    assert response.media_type == "image/png"
