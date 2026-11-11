@@ -319,3 +319,110 @@ async def test_processing_enqueue_cannot_override_cancelled_document(
         "documentId": document_id,
         "status": "uploaded",
     }
+
+
+@pytest.mark.anyio
+async def test_image_preview_uses_published_processing_claim(
+    monkeypatch,
+):
+    document_id = "document-123"
+    job_id = "job-456"
+    claim_id = "claim-winning"
+    image_id = "image-123"
+
+    monkeypatch.setattr(
+        documents,
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
+            "documentId": document_id,
+        },
+    )
+
+    monkeypatch.setattr(
+        documents,
+        "get_review_result",
+        lambda document_id: {
+            "documentId": document_id,
+            "processingAssets": {
+                "layout": "claim",
+                "jobId": job_id,
+                "claimId": claim_id,
+            },
+        },
+    )
+
+    requested_keys = []
+
+    def fake_get_object_from_s3(key):
+        requested_keys.append(key)
+        return b"png-bytes"
+
+    monkeypatch.setattr(
+        documents,
+        "get_object_from_s3",
+        fake_get_object_from_s3,
+    )
+
+    response = await documents.get_document_image_preview(
+        document_id,
+        image_id,
+        current_user=CURRENT_USER,
+    )
+
+    assert requested_keys == [
+        "documents/document-123/"
+        "processing-jobs/job-456/"
+        "claims/claim-winning/"
+        "previews/image-123.png"
+    ]
+
+    assert response.body == b"png-bytes"
+    assert response.media_type == "image/png"
+
+
+@pytest.mark.anyio
+async def test_image_preview_rejects_incomplete_claim_metadata(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        documents,
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
+            "documentId": document_id,
+        },
+    )
+
+    monkeypatch.setattr(
+        documents,
+        "get_review_result",
+        lambda document_id: {
+            "documentId": document_id,
+            "processingAssets": {
+                "layout": "claim",
+                "jobId": "job-456",
+                # Missing claimId.
+            },
+        },
+    )
+
+    def unexpected_s3_read(key):
+        pytest.fail(f"Unexpected S3 read: {key}")
+
+    monkeypatch.setattr(
+        documents,
+        "get_object_from_s3",
+        unexpected_s3_read,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await documents.get_document_image_preview(
+            "document-123",
+            "image-123",
+            current_user=CURRENT_USER,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert (
+        exc_info.value.detail
+        == "Invalid processing asset storage metadata"
+    )

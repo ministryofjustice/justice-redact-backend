@@ -322,3 +322,113 @@ def test_review_data_uses_published_processing_job_assets(
         manifest_key,
         search_chunk_key,
     ]
+
+
+def test_review_data_reads_only_published_claim_assets(monkeypatch):
+    document_id = "document-123"
+    job_id = "job-456"
+    claim_id = "claim-winning"
+
+    prefix = (
+        f"documents/{document_id}/processing-jobs/{job_id}/"
+        f"claims/{claim_id}/review"
+    )
+
+    monkeypatch.setattr(
+        review_data_service,
+        "get_review_result",
+        lambda document_id: {
+            "documentId": document_id,
+            "processingAssets": {
+                "layout": "claim",
+                "jobId": job_id,
+                "claimId": claim_id,
+            },
+        },
+    )
+
+    responses = {
+        f"{prefix}/manifest.json": {
+            "chunks": [
+                {
+                    "chunkIndex": 1,
+                    "pageStart": 1,
+                    "pageEnd": 100,
+                },
+            ],
+        },
+        f"{prefix}/chunks/0001.json": {
+            "pages": [{"pageNumber": 1, "textItems": []}],
+        },
+        f"{prefix}/search/0001.json": {
+            "pages": [{"pageNumber": 1, "textItems": []}],
+        },
+    }
+
+    reads = []
+
+    def fake_download(key):
+        reads.append(key)
+        return responses[key]
+
+    monkeypatch.setattr(
+        review_data_service,
+        "download_json_from_s3",
+        fake_download,
+    )
+
+    pages = review_data_service.get_review_pages(
+        document_id=document_id,
+        page_start=1,
+        page_end=1,
+    )
+
+    search_pages = review_data_service.get_review_search_pages(
+        document_id=document_id,
+    )
+
+    assert [page["pageNumber"] for page in pages] == [1]
+    assert [page["pageNumber"] for page in search_pages] == [1]
+
+    assert reads == [
+        f"{prefix}/manifest.json",
+        f"{prefix}/chunks/0001.json",
+        f"{prefix}/manifest.json",
+        f"{prefix}/search/0001.json",
+    ]
+
+
+def test_review_data_rejects_incomplete_claim_metadata(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(
+        review_data_service,
+        "get_review_result",
+        lambda document_id: {
+            "documentId": document_id,
+            "processingAssets": {
+                "layout": "claim",
+                "jobId": "job-456",
+                # Missing claimId must not trigger legacy fallback.
+            },
+        },
+    )
+
+    def unexpected_download(key):
+        pytest.fail(f"Unexpected S3 read: {key}")
+
+    monkeypatch.setattr(
+        review_data_service,
+        "download_json_from_s3",
+        unexpected_download,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid processing asset storage metadata",
+    ):
+        review_data_service.get_review_pages(
+            document_id="document-123",
+            page_start=1,
+            page_end=10,
+        )

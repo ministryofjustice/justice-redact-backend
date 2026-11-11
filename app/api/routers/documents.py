@@ -20,6 +20,7 @@ from app.services.s3_service import get_object_from_s3
 from app.services.s3_keys import (
     preview_image_key,
     processing_preview_image_key,
+    processing_claim_preview_image_key,
 )
 from app.services.review_result_store import get_review_result
 from app.services.s3_keys import document_prefix
@@ -244,6 +245,20 @@ async def get_document_image_preview(
         key = processing_preview_image_key(
             document_id,
             processing_assets["jobId"],
+            image_id,
+        )
+    elif (
+        isinstance(processing_assets, dict)
+        and processing_assets.get("layout") == "claim"
+        and isinstance(processing_assets.get("jobId"), str)
+        and processing_assets["jobId"]
+        and isinstance(processing_assets.get("claimId"), str)
+        and processing_assets["claimId"]
+    ):
+        key = processing_claim_preview_image_key(
+            document_id,
+            processing_assets["jobId"],
+            processing_assets["claimId"],
             image_id,
         )
     else:

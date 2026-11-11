@@ -34,6 +34,8 @@ from app.services.s3_keys import (
     document_geometry_manifest_key,
     processing_geometry_chunk_key,
     processing_geometry_manifest_key,
+    processing_claim_geometry_chunk_key,
+    processing_claim_geometry_manifest_key,
     original_pdf_key,
     redaction_run_exempt_pdf_key,
     redaction_run_redacted_pdf_key,
@@ -379,8 +381,12 @@ def apply_redactions_for_document(
         else None
     )
 
+    geometry_job_id = None
+    geometry_claim_id = None
+
     if processing_assets is None:
-        geometry_job_id = None
+        # Legacy document-level geometry.
+        pass
     elif (
         isinstance(processing_assets, dict)
         and processing_assets.get("layout") == "job"
@@ -388,6 +394,16 @@ def apply_redactions_for_document(
         and processing_assets["jobId"]
     ):
         geometry_job_id = processing_assets["jobId"]
+    elif (
+        isinstance(processing_assets, dict)
+        and processing_assets.get("layout") == "claim"
+        and isinstance(processing_assets.get("jobId"), str)
+        and processing_assets["jobId"]
+        and isinstance(processing_assets.get("claimId"), str)
+        and processing_assets["claimId"]
+    ):
+        geometry_job_id = processing_assets["jobId"]
+        geometry_claim_id = processing_assets["claimId"]
     else:
         raise ValueError("Invalid processing asset storage metadata")
 
@@ -439,14 +455,21 @@ def apply_redactions_for_document(
 
     start = time.perf_counter()
 
-    manifest_key = (
-        processing_geometry_manifest_key(
+    if geometry_job_id is None:
+        manifest_key = document_geometry_manifest_key(
+            document_id
+        )
+    elif geometry_claim_id is None:
+        manifest_key = processing_geometry_manifest_key(
             document_id,
             geometry_job_id,
         )
-        if geometry_job_id is not None
-        else document_geometry_manifest_key(document_id)
-    )
+    else:
+        manifest_key = processing_claim_geometry_manifest_key(
+            document_id,
+            geometry_job_id,
+            geometry_claim_id,
+        )
 
     manifest = download_json_from_s3(manifest_key)
 
@@ -510,18 +533,24 @@ def apply_redactions_for_document(
 
         chunk_start = time.perf_counter()
 
-        chunk_key = (
-            processing_geometry_chunk_key(
+        if geometry_job_id is None:
+            chunk_key = document_geometry_chunk_key(
+                document_id,
+                chunk_index,
+            )
+        elif geometry_claim_id is None:
+            chunk_key = processing_geometry_chunk_key(
                 document_id,
                 geometry_job_id,
                 chunk_index,
             )
-            if geometry_job_id is not None
-            else document_geometry_chunk_key(
+        else:
+            chunk_key = processing_claim_geometry_chunk_key(
                 document_id,
+                geometry_job_id,
+                geometry_claim_id,
                 chunk_index,
             )
-        )
 
         chunk_geometry = download_json_from_s3(chunk_key)
 
