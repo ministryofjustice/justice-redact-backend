@@ -251,3 +251,71 @@ async def test_image_preview_uses_published_processing_job(
 
     assert response.body == b"png-bytes"
     assert response.media_type == "image/png"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("enqueue_fails", [False, True])
+async def test_processing_enqueue_cannot_override_cancelled_document(
+    monkeypatch,
+    enqueue_fails,
+):
+    from types import SimpleNamespace
+
+    document_id = "document-123"
+
+    # The initial request starts successfully, but the user
+    # cancels processing before SQS enqueue finishes.
+    monkeypatch.setattr(
+        documents,
+        "get_document_for_user_or_404",
+        lambda document_id, user_id: {
+            "documentId": document_id,
+            "status": "uploaded",
+        },
+    )
+
+    monkeypatch.setattr(
+        documents,
+        "try_start_document_processing_enqueue",
+        lambda **kwargs: True,
+    )
+
+    def send_message(**kwargs):
+        if enqueue_fails:
+            raise RuntimeError("SQS enqueue failed")
+        return "message-123"
+
+    monkeypatch.setattr(
+        documents,
+        "send_document_processing_message",
+        send_message,
+    )
+
+    # The cancellation invalidated the original job, so
+    # neither transition may update the document.
+    monkeypatch.setattr(
+        documents,
+        "mark_document_processing_queued",
+        lambda **kwargs: False,
+    )
+
+    monkeypatch.setattr(
+        documents,
+        "mark_document_processing_enqueue_failed",
+        lambda **kwargs: False,
+    )
+
+    response = await documents.process_document(
+        document_id,
+        SimpleNamespace(
+            subjectName="Test Subject",
+            subjectPrisonNumber="A1234BC",
+            otherPhrases="",
+        ),
+        current_user=CURRENT_USER,
+    )
+
+    assert response == {
+        "documentId": document_id,
+        "status": "uploaded",
+    }
