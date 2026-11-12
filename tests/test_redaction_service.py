@@ -410,3 +410,159 @@ def test_apply_redactions_reports_progress_for_three_export_path(
     }
 
     assert result["exemptExportPath"] is not None
+
+
+def test_redaction_uses_published_processing_claim_geometry(
+    monkeypatch,
+):
+    document_id = "document-123"
+    job_id = "job-456"
+    claim_id = "claim-winning"
+
+    prefix = (
+        f"documents/{document_id}/processing-jobs/{job_id}/"
+        f"claims/{claim_id}/geometry"
+    )
+
+    manifest_key = f"{prefix}/manifest.json"
+    chunk_key = f"{prefix}/chunks/0001.json"
+
+    monkeypatch.setattr(
+        redaction_service,
+        "get_document_or_404",
+        lambda document_id: {"filename": "source.pdf"},
+    )
+
+    monkeypatch.setattr(
+        redaction_service,
+        "get_review_result",
+        lambda document_id: {
+            "findings": [],
+            "processingAssets": {
+                "layout": "claim",
+                "jobId": job_id,
+                "claimId": claim_id,
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        redaction_service,
+        "download_file_from_s3",
+        lambda *args, **kwargs: None,
+    )
+
+    requested_keys = []
+
+    def fake_download_json(key):
+        requested_keys.append(key)
+
+        if key == manifest_key:
+            return {
+                "totalPages": 1,
+                "chunks": [
+                    {
+                        "chunkIndex": 1,
+                        "pageStart": 1,
+                        "pageEnd": 1,
+                    }
+                ],
+            }
+
+        if key == chunk_key:
+            return {"geometry": "winning-claim"}
+
+        pytest.fail(f"Unexpected S3 geometry read: {key}")
+
+    monkeypatch.setattr(
+        redaction_service,
+        "download_json_from_s3",
+        fake_download_json,
+    )
+
+    # Exercise the actual geometry-loading path without
+    # performing PDF transformations.
+    monkeypatch.setattr(
+        redaction_service,
+        "Document",
+        SimpleNamespace(
+            model_validate=lambda value: SimpleNamespace(
+                source_path=None,
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        redaction_service,
+        "build_pdf_handler_decisions",
+        lambda **kwargs: [],
+    )
+
+    monkeypatch.setattr(
+        redaction_service,
+        "build_ai_pdf_handler_decisions",
+        lambda **kwargs: [],
+    )
+
+    # Force one chunk through geometry resolution.
+    monkeypatch.setattr(
+        redaction_service,
+        "group_decisions_by_chunk",
+        lambda **kwargs: {1: []},
+    )
+
+    monkeypatch.setattr(
+        redaction_service,
+        "resolve_pdf_decisions_once",
+        lambda **kwargs: [],
+    )
+
+    monkeypatch.setattr(
+        redaction_service,
+        "build_page_decisions",
+        lambda decisions: {
+            "exempt_page_numbers": [],
+            "deleted_page_numbers": [],
+        },
+    )
+
+    monkeypatch.setattr(
+        redaction_service,
+        "apply_pdf_decisions",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        redaction_service,
+        "apply_vetted_pdf_highlights",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        redaction_service,
+        "upload_file_to_s3",
+        lambda *args, **kwargs: None,
+    )
+
+    # No valid decisions are supplied: the service should reject
+    # the export after loading the published claim's geometry.
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc_info:
+        redaction_service.apply_redactions_for_document(
+            document_id=document_id,
+            run_id="run-123",
+            request=SimpleNamespace(decisions=[]),
+            is_redaction_active=lambda: True,
+            progress_callback=lambda progress: None,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == (
+        "No valid redaction or page decisions could be built"
+    )
+
+    assert requested_keys == [
+        manifest_key,
+        chunk_key,
+    ]
