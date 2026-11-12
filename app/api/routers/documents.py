@@ -8,6 +8,7 @@ from app.services.document_store import (
     get_document_for_user_or_404,
     update_document_record,
     mark_document_processing_queued,
+    mark_document_processing_enqueue_failed,
     try_start_document_processing_enqueue,
 )
 from app.services.file_store import save_upload_file
@@ -16,11 +17,17 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from app.services.s3_service import get_object_from_s3
-from app.services.s3_keys import preview_image_key
+from app.services.s3_keys import (
+    preview_image_key,
+    processing_preview_image_key,
+    processing_claim_preview_image_key,
+)
+from app.services.review_result_store import get_review_result
 from app.services.s3_keys import document_prefix
 from app.services.s3_service import delete_s3_prefix
 from app.services.workflow_service import build_workflow_response
 from app.services.document_store import try_abandon_document_processing
+from app.services.document_store import request_processing_return_to_subject_details
 from app.api.dependencies.auth import get_current_user
 from app.services.auth_service import AuthenticatedUser
 
@@ -150,20 +157,40 @@ async def process_document(
             },
         )
 
-        update_document_record(
-            document_id,
-            status="enqueue_failed",
+        failed = mark_document_processing_enqueue_failed(
+            document_id=document_id,
+            job_id=job_id,
         )
+
+        if not failed:
+            current_document = get_document_for_user_or_404(
+                document_id,
+                current_user.user_id,
+            )
+            return {
+                "documentId": document_id,
+                "status": current_document["status"],
+            }
 
         raise HTTPException(
             status_code=503,
             detail="The document could not be queued for processing",
         )
 
-    mark_document_processing_queued(
+    queued = mark_document_processing_queued(
         document_id=document_id,
         job_id=job_id,
     )
+
+    if not queued:
+        current_document = get_document_for_user_or_404(
+            document_id,
+            current_user.user_id,
+        )
+        return {
+            "documentId": document_id,
+            "status": current_document["status"],
+        }
 
     logger.info(
         "document_processing_queued",
@@ -192,10 +219,53 @@ async def get_document_image_preview(
         current_user.user_id,
     )
 
-    key = preview_image_key(
-        document_id,
-        image_id,
-    )
+    # Only inspect processing metadata after ownership is verified.
+    review_result = get_review_result(document_id)
+
+    if not isinstance(review_result, dict):
+        raise HTTPException(
+            status_code=404,
+            detail="Processed review data not found",
+        )
+
+    processing_assets = review_result.get("processingAssets")
+
+    if processing_assets is None:
+        # Documents processed before job-specific S3 storage.
+        key = preview_image_key(
+            document_id,
+            image_id,
+        )
+    elif (
+        isinstance(processing_assets, dict)
+        and processing_assets.get("layout") == "job"
+        and isinstance(processing_assets.get("jobId"), str)
+        and processing_assets["jobId"]
+    ):
+        key = processing_preview_image_key(
+            document_id,
+            processing_assets["jobId"],
+            image_id,
+        )
+    elif (
+        isinstance(processing_assets, dict)
+        and processing_assets.get("layout") == "claim"
+        and isinstance(processing_assets.get("jobId"), str)
+        and processing_assets["jobId"]
+        and isinstance(processing_assets.get("claimId"), str)
+        and processing_assets["claimId"]
+    ):
+        key = processing_claim_preview_image_key(
+            document_id,
+            processing_assets["jobId"],
+            processing_assets["claimId"],
+            image_id,
+        )
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail="Invalid processing asset storage metadata",
+        )
 
     try:
         image_bytes = get_object_from_s3(key)
@@ -295,5 +365,43 @@ async def abandon_document(
         )
 
     document["status"] = "abandoned"
+
+    return build_workflow_response(document)
+
+
+
+@router.post("/{document_id}/return-to-subject-details")
+async def return_to_subject_details(
+    document_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    # Check ownership before modifying document state.
+    get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
+
+    result = request_processing_return_to_subject_details(
+        document_id=document_id,
+    )
+
+    if result == "not_found":
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found",
+        )
+
+    if result == "conflict":
+        raise HTTPException(
+            status_code=409,
+            detail="Document cannot return to subject details",
+        )
+
+    # Return the authoritative workflow state after the
+    # transition, including cases where Review completed first.
+    document = get_document_for_user_or_404(
+        document_id,
+        current_user.user_id,
+    )
 
     return build_workflow_response(document)

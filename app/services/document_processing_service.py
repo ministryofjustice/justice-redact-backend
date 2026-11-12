@@ -15,12 +15,12 @@ from app.services.review_result_store import (
     publish_review_result_if_processing_owner,
 )
 from app.services.s3_keys import (
-    document_geometry_chunk_key,
-    document_geometry_manifest_key,
-    document_review_chunk_key,
-    document_review_manifest_key,
-    document_review_search_chunk_key,
-    preview_image_key,
+    processing_claim_geometry_chunk_key,
+    processing_claim_geometry_manifest_key,
+    processing_claim_review_chunk_key,
+    processing_claim_review_manifest_key,
+    processing_claim_review_search_chunk_key,
+    processing_claim_preview_image_key,
 )
 from app.services.s3_service import (
     download_file_from_s3,
@@ -665,8 +665,10 @@ def process_document_pipeline(
 
             upload_json_to_s3(
                 chunk_document.model_dump(),
-                document_geometry_chunk_key(
+                processing_claim_geometry_chunk_key(
                     document_id,
+                    job_id,
+                    claim_id,
                     chunk_index,
                 ),
             )
@@ -743,8 +745,10 @@ def process_document_pipeline(
                         output_path=output_path,
                     )
 
-                    preview_key = preview_image_key(
+                    preview_key = processing_claim_preview_image_key(
                         document_id,
+                        job_id,
+                        claim_id,
                         image["imageId"],
                     )
 
@@ -787,8 +791,10 @@ def process_document_pipeline(
 
             upload_json_to_s3(
                 review_chunk,
-                document_review_chunk_key(
+                processing_claim_review_chunk_key(
                     document_id,
+                    job_id,
+                    claim_id,
                     chunk_index,
                 ),
             )
@@ -827,8 +833,10 @@ def process_document_pipeline(
 
             upload_json_to_s3(
                 search_chunk,
-                document_review_search_chunk_key(
+                processing_claim_review_search_chunk_key(
                     document_id,
+                    job_id,
+                    claim_id,
                     chunk_index,
                 ),
             )
@@ -885,7 +893,7 @@ def process_document_pipeline(
 
         upload_json_to_s3(
             manifest,
-            document_geometry_manifest_key(document_id),
+            processing_claim_geometry_manifest_key(document_id, job_id, claim_id),
         )
 
         _log_stage(
@@ -898,7 +906,7 @@ def process_document_pipeline(
 
         upload_json_to_s3(
             manifest,
-            document_review_manifest_key(document_id),
+            processing_claim_review_manifest_key(document_id, job_id, claim_id),
         )
 
         _log_stage(
@@ -923,6 +931,11 @@ def process_document_pipeline(
             "documentId": document_id,
             "filename": document["filename"],
             "status": "ready_for_review",
+            "processingAssets": {
+                "layout": "claim",
+                "jobId": job_id,
+                "claimId": claim_id,
+            },
         }
 
         assert_processing_active(is_processing_active)

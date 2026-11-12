@@ -63,3 +63,160 @@ def document_review_search_chunk_key(
     chunk_index: int,
 ) -> str:
     return f"documents/{document_id}/review/search/{chunk_index:04d}.json"
+
+
+
+# Job-specific intermediate assets prevent cancelled or stale
+# processing workers from overwriting a newer processing attempt.
+# The original uploaded PDF remains at original_pdf_key(...).
+
+
+def processing_job_prefix(
+    document_id: str,
+    job_id: str,
+) -> str:
+    return f"{document_prefix(document_id)}processing-jobs/{job_id}/"
+
+
+def processing_geometry_manifest_key(
+    document_id: str,
+    job_id: str,
+) -> str:
+    return f"{processing_job_prefix(document_id, job_id)}geometry/manifest.json"
+
+
+def processing_geometry_chunk_key(
+    document_id: str,
+    job_id: str,
+    chunk_index: int,
+) -> str:
+    return (
+        f"{processing_job_prefix(document_id, job_id)}"
+        f"geometry/chunks/{chunk_index:04d}.json"
+    )
+
+
+def processing_review_manifest_key(
+    document_id: str,
+    job_id: str,
+) -> str:
+    return f"{processing_job_prefix(document_id, job_id)}review/manifest.json"
+
+
+def processing_review_chunk_key(
+    document_id: str,
+    job_id: str,
+    chunk_index: int,
+) -> str:
+    return (
+        f"{processing_job_prefix(document_id, job_id)}"
+        f"review/chunks/{chunk_index:04d}.json"
+    )
+
+
+def processing_review_search_chunk_key(
+    document_id: str,
+    job_id: str,
+    chunk_index: int,
+) -> str:
+    return (
+        f"{processing_job_prefix(document_id, job_id)}"
+        f"review/search/{chunk_index:04d}.json"
+    )
+
+
+def processing_preview_image_key(
+    document_id: str,
+    job_id: str,
+    image_id: str,
+) -> str:
+    return (
+        f"{processing_job_prefix(document_id, job_id)}"
+        f"previews/{image_id}.png"
+    )
+
+
+# Claim-specific assets isolate overlapping worker attempts
+# within the same processing job. Existing job-specific keys
+# remain available for already-published review results.
+
+
+def processing_claim_prefix(
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+) -> str:
+    return (
+        f"{processing_job_prefix(document_id, job_id)}"
+        f"claims/{claim_id}/"
+    )
+
+
+def processing_claim_geometry_manifest_key(
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+) -> str:
+    return (
+        f"{processing_claim_prefix(document_id, job_id, claim_id)}"
+        "geometry/manifest.json"
+    )
+
+
+def processing_claim_geometry_chunk_key(
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+    chunk_index: int,
+) -> str:
+    return (
+        f"{processing_claim_prefix(document_id, job_id, claim_id)}"
+        f"geometry/chunks/{chunk_index:04d}.json"
+    )
+
+
+def processing_claim_review_manifest_key(
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+) -> str:
+    return (
+        f"{processing_claim_prefix(document_id, job_id, claim_id)}"
+        "review/manifest.json"
+    )
+
+
+def processing_claim_review_chunk_key(
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+    chunk_index: int,
+) -> str:
+    return (
+        f"{processing_claim_prefix(document_id, job_id, claim_id)}"
+        f"review/chunks/{chunk_index:04d}.json"
+    )
+
+
+def processing_claim_review_search_chunk_key(
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+    chunk_index: int,
+) -> str:
+    return (
+        f"{processing_claim_prefix(document_id, job_id, claim_id)}"
+        f"review/search/{chunk_index:04d}.json"
+    )
+
+
+def processing_claim_preview_image_key(
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+    image_id: str,
+) -> str:
+    return (
+        f"{processing_claim_prefix(document_id, job_id, claim_id)}"
+        f"previews/{image_id}.png"
+    )
