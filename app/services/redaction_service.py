@@ -122,6 +122,7 @@ def build_pdf_handler_decisions(
                     text=decision.text,
                     source=decision.source,
                     action=decision.action,
+                    redaction_group_id=decision.redactionGroupId,
                 )
             )
             continue
@@ -138,6 +139,7 @@ def build_pdf_handler_decisions(
                     text=decision.text,
                     source=decision.source,
                     action=decision.action,
+                    redaction_group_id=decision.redactionGroupId,
                 )
             )
             continue
