@@ -405,7 +405,7 @@ wheels = [
 [[package]]
 name = "justice-redact"
 version = "0.1.0"
-source = { git = "https://github.com/moj-analytical-services/justice-redact.git?rev=6dbc9812c1dc7e302454b7c6fba2e6178925fa50#6dbc9812c1dc7e302454b7c6fba2e6178925fa50" }
+source = { git = "https://github.com/moj-analytical-services/justice-redact.git?rev=824623ca72f3b8aa860c5584339410a19bba1b21#824623ca72f3b8aa860c5584339410a19bba1b21" }
 dependencies = [
     { name = "boto3" },
     { name = "click" },
@@ -451,7 +451,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.16,<2" },
     { name = "boto3", specifier = "==1.43.6" },
     { name = "fastapi" },
-    { name = "justice-redact", git = "https://github.com/moj-analytical-services/justice-redact.git?rev=6dbc9812c1dc7e302454b7c6fba2e6178925fa50" },
+    { name = "justice-redact", git = "https://github.com/moj-analytical-services/justice-redact.git?rev=824623ca72f3b8aa860c5584339410a19bba1b21" },
     { name = "notifications-python-client", specifier = ">=12.2.0" },
     { name = "psycopg", extras = ["binary"] },
     { name = "pydantic" },
