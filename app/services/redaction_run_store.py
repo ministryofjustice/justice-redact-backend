@@ -55,7 +55,9 @@ def get_redaction_run(run_id: str) -> dict | None:
         if redaction_run is None:
             return None
 
-        return redaction_run_to_dict(redaction_run)
+        result = redaction_run_to_dict(redaction_run)
+        result["publishedClaimId"] = redaction_run.published_claim_id
+        return result
 
 
 def create_redaction_run(
@@ -561,6 +563,7 @@ def complete_redaction_run(
         ):
             return False
 
+        redaction_run.published_claim_id = claim_id
         redaction_run.status = "completed"
         redaction_run.processing_progress = 100
         redaction_run.page_counts = deepcopy(page_counts)

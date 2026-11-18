@@ -9,25 +9,65 @@ def redaction_run_prefix(
     return f"documents/{document_id}/redaction-runs/{run_id}/"
 
 
+
+def redaction_run_export_prefix(
+    document_id: str,
+    run_id: str,
+    claim_id: str | None = None,
+) -> str:
+    if claim_id is None:
+        return redaction_run_prefix(document_id, run_id)
+
+    if not claim_id or "/" in claim_id or "\\" in claim_id:
+        raise ValueError("Invalid redaction processing claim ID")
+
+    return (
+        f"{redaction_run_prefix(document_id, run_id)}"
+        f"claims/{claim_id}/"
+    )
+
+
+
+
 def redaction_run_redacted_pdf_key(
     document_id: str,
     run_id: str,
+    claim_id: str | None = None,
 ) -> str:
-    return f"{redaction_run_prefix(document_id, run_id)}" "exports/redacted.pdf"
+    prefix = redaction_run_export_prefix(
+        document_id,
+        run_id,
+        claim_id,
+    )
+    return f"{prefix}exports/redacted.pdf"
+
 
 
 def redaction_run_vetted_pdf_key(
     document_id: str,
     run_id: str,
+    claim_id: str | None = None,
 ) -> str:
-    return f"{redaction_run_prefix(document_id, run_id)}" "exports/vetted.pdf"
+    prefix = redaction_run_export_prefix(
+        document_id,
+        run_id,
+        claim_id,
+    )
+    return f"{prefix}exports/vetted.pdf"
+
 
 
 def redaction_run_exempt_pdf_key(
     document_id: str,
     run_id: str,
+    claim_id: str | None = None,
 ) -> str:
-    return f"{redaction_run_prefix(document_id, run_id)}" "exports/_exempt.pdf"
+    prefix = redaction_run_export_prefix(
+        document_id,
+        run_id,
+        claim_id,
+    )
+    return f"{prefix}exports/_exempt.pdf"
 
 
 def original_pdf_key(document_id: str, filename: str) -> str:

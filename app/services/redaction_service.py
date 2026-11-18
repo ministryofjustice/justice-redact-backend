@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import time
 
 from fastapi import HTTPException
@@ -316,6 +317,33 @@ def apply_redactions_for_document(
     *,
     document_id: str,
     run_id: str,
+    claim_id: str,
+    request: ApplyRedactionsRequest,
+    is_redaction_active=lambda: True,
+    progress_callback: Callable[[int], None] | None = None,
+) -> dict:
+    """Process PDFs inside a private, automatically cleaned workspace."""
+    with TemporaryDirectory(
+        prefix=".jr-redaction-",
+        dir="/tmp",
+    ) as temporary_directory:
+        return _apply_redactions_for_document_in_workspace(
+            workspace=Path(temporary_directory),
+            document_id=document_id,
+            run_id=run_id,
+            claim_id=claim_id,
+            request=request,
+            is_redaction_active=is_redaction_active,
+            progress_callback=progress_callback,
+        )
+
+
+def _apply_redactions_for_document_in_workspace(
+    *,
+    workspace: Path,
+    document_id: str,
+    run_id: str,
+    claim_id: str,
     request: ApplyRedactionsRequest,
     is_redaction_active=lambda: True,
     progress_callback: Callable[[int], None] | None = None,
@@ -430,13 +458,13 @@ def apply_redactions_for_document(
         flush=True,
     )
 
-    pdf_path = Path("/tmp") / f"{document_id}-{run_id}.pdf"
+    pdf_path = workspace / "original.pdf"
 
-    redacted_output_path = Path("/tmp") / f"{document_id}-{run_id}-redacted.pdf"
+    redacted_output_path = workspace / "redacted.pdf"
 
-    vetted_output_path = Path("/tmp") / f"{document_id}-{run_id}-vetted.pdf"
+    vetted_output_path = workspace / "vetted.pdf"
 
-    exempt_output_path = Path("/tmp") / f"{document_id}-{run_id}-exempt.pdf"
+    exempt_output_path = workspace / "exempt.pdf"
 
     start = time.perf_counter()
 
@@ -843,10 +871,7 @@ def apply_redactions_for_document(
 
     upload_file_to_s3(
         redacted_output_path,
-        redaction_run_redacted_pdf_key(
-            document_id,
-            run_id,
-        ),
+        redaction_run_redacted_pdf_key(document_id, run_id, claim_id),
     )
 
     completed_uploads += 1
@@ -873,10 +898,7 @@ def apply_redactions_for_document(
 
     upload_file_to_s3(
         vetted_output_path,
-        redaction_run_vetted_pdf_key(
-            document_id,
-            run_id,
-        ),
+        redaction_run_vetted_pdf_key(document_id, run_id, claim_id),
     )
 
     completed_uploads += 1
@@ -904,10 +926,7 @@ def apply_redactions_for_document(
 
         upload_file_to_s3(
             exempt_output_path,
-            redaction_run_exempt_pdf_key(
-                document_id,
-                run_id,
-            ),
+            redaction_run_exempt_pdf_key(document_id, run_id, claim_id),
         )
 
         completed_uploads += 1
@@ -950,22 +969,13 @@ def apply_redactions_for_document(
         "pageCounts": page_counts,
         "decisionTypes": sorted({decision.kind for decision in request.decisions}),
         "exportPath": (
-            redaction_run_redacted_pdf_key(
-                document_id,
-                run_id,
-            )
+            redaction_run_redacted_pdf_key(document_id, run_id, claim_id)
         ),
         "vettedExportPath": (
-            redaction_run_vetted_pdf_key(
-                document_id,
-                run_id,
-            )
+            redaction_run_vetted_pdf_key(document_id, run_id, claim_id)
         ),
         "exemptExportPath": (
-            redaction_run_exempt_pdf_key(
-                document_id,
-                run_id,
-            )
+            redaction_run_exempt_pdf_key(document_id, run_id, claim_id)
             if exempt_page_numbers
             else None
         ),
