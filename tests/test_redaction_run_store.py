@@ -145,6 +145,7 @@ def test_get_redaction_run_returns_run_state(
         },
         attempt_count=0,
         claim_id=None,
+        published_claim_id=None,
         lease_expires_at=None,
         page_counts=None,
         error_message=None,
@@ -181,6 +182,7 @@ def test_get_redaction_run_returns_run_state(
         "startedAt": None,
         "completedAt": None,
         "cancelledAt": None,
+        "publishedClaimId": None,
     }
 
 

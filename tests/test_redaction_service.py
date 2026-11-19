@@ -217,6 +217,7 @@ def test_apply_redactions_reports_progress_for_two_export_path(
     result = redaction_service.apply_redactions_for_document(
         document_id="document-123",
         run_id="run-123",
+        claim_id="claim-123",
         request=request,
         is_redaction_active=lambda: True,
         progress_callback=progress_updates.append,
@@ -374,6 +375,7 @@ def test_apply_redactions_reports_progress_for_three_export_path(
     result = redaction_service.apply_redactions_for_document(
         document_id="document-123",
         run_id="run-123",
+        claim_id="claim-123",
         request=request,
         is_redaction_active=lambda: True,
         progress_callback=progress_updates.append,
@@ -552,6 +554,7 @@ def test_redaction_uses_published_processing_claim_geometry(
         redaction_service.apply_redactions_for_document(
             document_id=document_id,
             run_id="run-123",
+            claim_id="claim-123",
             request=SimpleNamespace(decisions=[]),
             is_redaction_active=lambda: True,
             progress_callback=lambda progress: None,

@@ -24,7 +24,32 @@ def redaction_run_to_dict(redaction_run: RedactionRun) -> dict:
             if redaction_run.lease_expires_at
             else None
         ),
-        "pageCounts": redaction_run.page_counts,
+        "pageCounts": (
+            {
+                name: redaction_run.page_counts[name]
+                for name in (
+                    "original",
+                    "exempt",
+                    "deleted",
+                    "redacted",
+                )
+                if name in redaction_run.page_counts
+            }
+            if isinstance(redaction_run.page_counts, dict)
+            else redaction_run.page_counts
+        ),
+        **(
+            {
+                "hasContentRedactions":
+                    redaction_run.page_counts["hasContentRedactions"]
+            }
+            if isinstance(redaction_run.page_counts, dict)
+            and isinstance(
+                redaction_run.page_counts.get("hasContentRedactions"),
+                bool,
+            )
+            else {}
+        ),
         "errorMessage": redaction_run.error_message,
         "createdAt": (
             redaction_run.created_at.isoformat() if redaction_run.created_at else None
@@ -55,7 +80,9 @@ def get_redaction_run(run_id: str) -> dict | None:
         if redaction_run is None:
             return None
 
-        return redaction_run_to_dict(redaction_run)
+        result = redaction_run_to_dict(redaction_run)
+        result["publishedClaimId"] = redaction_run.published_claim_id
+        return result
 
 
 def create_redaction_run(
@@ -561,6 +588,7 @@ def complete_redaction_run(
         ):
             return False
 
+        redaction_run.published_claim_id = claim_id
         redaction_run.status = "completed"
         redaction_run.processing_progress = 100
         redaction_run.page_counts = deepcopy(page_counts)

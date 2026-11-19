@@ -20,7 +20,7 @@ from app.services.redaction_service import (
     RedactionProcessingCancelled,
     apply_redactions_for_document,
 )
-from app.services.s3_keys import redaction_run_prefix
+from app.services.s3_keys import redaction_run_export_prefix
 from app.services.s3_service import delete_s3_prefix
 from app.services.sqs_service import (
     delete_redaction_processing_message,
@@ -347,6 +347,7 @@ def process_sqs_message(message: dict) -> None:
         result = apply_redactions_for_document(
             document_id=parsed.document_id,
             run_id=parsed.run_id,
+            claim_id=claim_id,
             request=request,
             is_redaction_active=lambda: (
                 is_redaction_run_owner(
@@ -360,7 +361,19 @@ def process_sqs_message(message: dict) -> None:
         completed = complete_redaction_run(
             run_id=parsed.run_id,
             claim_id=claim_id,
-            page_counts=result["pageCounts"],
+            page_counts={
+                **result["pageCounts"],
+                **(
+                    {
+                        "hasContentRedactions":
+                            result["hasContentRedactions"]
+                    }
+                    if isinstance(
+                        result.get("hasContentRedactions"), bool
+                    )
+                    else {}
+                ),
+            },
         )
 
         if not completed:
@@ -383,23 +396,6 @@ def process_sqs_message(message: dict) -> None:
         )
 
     except RedactionProcessingCancelled:
-        try:
-            delete_s3_prefix(
-                redaction_run_prefix(
-                    parsed.document_id,
-                    parsed.run_id,
-                )
-            )
-        except Exception as exc:
-            logger.error(
-                "redaction_processing_cancel_cleanup_failed",
-                extra={
-                    "event": ("redaction_processing_cancel_cleanup_failed"),
-                    "document_id": parsed.document_id,
-                    "run_id": parsed.run_id,
-                    "error_type": type(exc).__name__,
-                },
-            )
 
         delete_redaction_processing_message(
             receipt_handle=receipt_handle,
@@ -427,23 +423,6 @@ def process_sqs_message(message: dict) -> None:
         )
 
         if not failed:
-            try:
-                delete_s3_prefix(
-                    redaction_run_prefix(
-                        parsed.document_id,
-                        parsed.run_id,
-                    )
-                )
-            except Exception as cleanup_exc:
-                logger.error(
-                    "redaction_processing_stale_cleanup_failed",
-                    extra={
-                        "event": ("redaction_processing_stale_cleanup_failed"),
-                        "document_id": parsed.document_id,
-                        "run_id": parsed.run_id,
-                        "error_type": type(cleanup_exc).__name__,
-                    },
-                )
 
             delete_redaction_processing_message(
                 receipt_handle=receipt_handle,
@@ -460,6 +439,31 @@ def process_sqs_message(message: dict) -> None:
             )
 
             return
+
+        # fail_redaction_run() has committed the transition away
+        # from this claim. Only now is its staging prefix safe
+        # to clean. A rejected transition returns above without
+        # deleting potentially published or active files.
+        try:
+            delete_s3_prefix(
+                redaction_run_export_prefix(
+                    parsed.document_id,
+                    parsed.run_id,
+                    claim_id,
+                )
+            )
+        except Exception as cleanup_exc:
+            # Cleanup must not hide the original processing
+            # failure or prevent the SQS retry/DLQ behaviour.
+            logger.error(
+                "redaction_processing_claim_cleanup_failed",
+                extra={
+                    "event": "redaction_processing_claim_cleanup_failed",
+                    "document_id": parsed.document_id,
+                    "run_id": parsed.run_id,
+                    "error_type": type(cleanup_exc).__name__,
+                },
+            )
 
         logger.error(
             "redaction_processing_failed",

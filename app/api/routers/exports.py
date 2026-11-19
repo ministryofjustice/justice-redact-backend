@@ -89,20 +89,11 @@ async def get_document_export(
         run_id=run_id,
     )
 
-    redacted_key = redaction_run_redacted_pdf_key(
-        document_id,
-        run_id,
-    )
+    redacted_key = redaction_run_redacted_pdf_key(document_id, run_id, redaction_run.get("publishedClaimId"))
 
-    vetted_key = redaction_run_vetted_pdf_key(
-        document_id,
-        run_id,
-    )
+    vetted_key = redaction_run_vetted_pdf_key(document_id, run_id, redaction_run.get("publishedClaimId"))
 
-    exempt_key = redaction_run_exempt_pdf_key(
-        document_id,
-        run_id,
-    )
+    exempt_key = redaction_run_exempt_pdf_key(document_id, run_id, redaction_run.get("publishedClaimId"))
 
     if not object_exists_in_s3(redacted_key):
         logger.warning(
@@ -174,6 +165,17 @@ async def get_document_export(
         ),
         "pageCount": original_page_count,
         "pageCounts": page_counts,
+        **(
+            {
+                "hasContentRedactions":
+                    redaction_run["hasContentRedactions"]
+            }
+            if isinstance(
+                redaction_run.get("hasContentRedactions"),
+                bool,
+            )
+            else {}
+        ),
     }
 
 
@@ -188,26 +190,17 @@ async def download_all_files(
         current_user.user_id,
     )
 
-    _get_current_completed_run(
+    redaction_run = _get_current_completed_run(
         document=document,
         document_id=document_id,
         run_id=run_id,
     )
 
-    redacted_key = redaction_run_redacted_pdf_key(
-        document_id,
-        run_id,
-    )
+    redacted_key = redaction_run_redacted_pdf_key(document_id, run_id, redaction_run.get("publishedClaimId"))
 
-    vetted_key = redaction_run_vetted_pdf_key(
-        document_id,
-        run_id,
-    )
+    vetted_key = redaction_run_vetted_pdf_key(document_id, run_id, redaction_run.get("publishedClaimId"))
 
-    exempt_key = redaction_run_exempt_pdf_key(
-        document_id,
-        run_id,
-    )
+    exempt_key = redaction_run_exempt_pdf_key(document_id, run_id, redaction_run.get("publishedClaimId"))
 
     if not object_exists_in_s3(redacted_key):
         raise HTTPException(
@@ -292,16 +285,13 @@ async def download_redacted_file(
         current_user.user_id,
     )
 
-    _get_current_completed_run(
+    redaction_run = _get_current_completed_run(
         document=document,
         document_id=document_id,
         run_id=run_id,
     )
 
-    key = redaction_run_redacted_pdf_key(
-        document_id,
-        run_id,
-    )
+    key = redaction_run_redacted_pdf_key(document_id, run_id, redaction_run.get("publishedClaimId"))
 
     if not object_exists_in_s3(key):
         raise HTTPException(
@@ -344,16 +334,13 @@ async def download_vetted_file(
         current_user.user_id,
     )
 
-    _get_current_completed_run(
+    redaction_run = _get_current_completed_run(
         document=document,
         document_id=document_id,
         run_id=run_id,
     )
 
-    key = redaction_run_vetted_pdf_key(
-        document_id,
-        run_id,
-    )
+    key = redaction_run_vetted_pdf_key(document_id, run_id, redaction_run.get("publishedClaimId"))
 
     if not object_exists_in_s3(key):
         raise HTTPException(
@@ -396,16 +383,13 @@ async def download_exempt_file(
         current_user.user_id,
     )
 
-    _get_current_completed_run(
+    redaction_run = _get_current_completed_run(
         document=document,
         document_id=document_id,
         run_id=run_id,
     )
 
-    key = redaction_run_exempt_pdf_key(
-        document_id,
-        run_id,
-    )
+    key = redaction_run_exempt_pdf_key(document_id, run_id, redaction_run.get("publishedClaimId"))
 
     if not object_exists_in_s3(key):
         raise HTTPException(
