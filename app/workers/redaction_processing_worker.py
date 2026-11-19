@@ -361,7 +361,19 @@ def process_sqs_message(message: dict) -> None:
         completed = complete_redaction_run(
             run_id=parsed.run_id,
             claim_id=claim_id,
-            page_counts=result["pageCounts"],
+            page_counts={
+                **result["pageCounts"],
+                **(
+                    {
+                        "hasContentRedactions":
+                            result["hasContentRedactions"]
+                    }
+                    if isinstance(
+                        result.get("hasContentRedactions"), bool
+                    )
+                    else {}
+                ),
+            },
         )
 
         if not completed:

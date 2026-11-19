@@ -24,7 +24,32 @@ def redaction_run_to_dict(redaction_run: RedactionRun) -> dict:
             if redaction_run.lease_expires_at
             else None
         ),
-        "pageCounts": redaction_run.page_counts,
+        "pageCounts": (
+            {
+                name: redaction_run.page_counts[name]
+                for name in (
+                    "original",
+                    "exempt",
+                    "deleted",
+                    "redacted",
+                )
+                if name in redaction_run.page_counts
+            }
+            if isinstance(redaction_run.page_counts, dict)
+            else redaction_run.page_counts
+        ),
+        **(
+            {
+                "hasContentRedactions":
+                    redaction_run.page_counts["hasContentRedactions"]
+            }
+            if isinstance(redaction_run.page_counts, dict)
+            and isinstance(
+                redaction_run.page_counts.get("hasContentRedactions"),
+                bool,
+            )
+            else {}
+        ),
         "errorMessage": redaction_run.error_message,
         "createdAt": (
             redaction_run.created_at.isoformat() if redaction_run.created_at else None

@@ -313,6 +313,32 @@ def group_decisions_by_chunk(
     return grouped
 
 
+def has_applied_content_redactions(
+    *,
+    resolved_decisions: list[tuple],
+    excluded_page_numbers: list[int],
+) -> bool:
+    """
+    Report whether the redacted PDF has an applied content redaction.
+
+    Only explicit, successfully resolved vetter redactions on pages
+    retained in the redacted PDF qualify. AI suggestions, unresolved
+    operations and redactions on exempted/deleted pages do not.
+    """
+    excluded_pages = set(excluded_page_numbers)
+
+    for decision, resolved in resolved_decisions:
+        if (
+            resolved is not None
+            and decision.action == "redact"
+            and decision.source != "ai"
+            and decision.page_number not in excluded_pages
+        ):
+            return True
+
+    return False
+
+
 def apply_redactions_for_document(
     *,
     document_id: str,
@@ -706,6 +732,11 @@ def _apply_redactions_for_document_in_workspace(
         set(exempt_page_numbers + deleted_page_numbers)
     )
 
+    has_content_redactions = has_applied_content_redactions(
+        resolved_decisions=resolved_decisions,
+        excluded_page_numbers=redacted_excluded_page_numbers,
+    )
+
     # Exempt pages are removed from the vetted copy because they are
     # exported separately. Deleted pages remain in the vetted copy.
     vetted_excluded_page_numbers = exempt_page_numbers
@@ -967,6 +998,7 @@ def _apply_redactions_for_document_in_workspace(
         "redactedExcludedPages": (redacted_excluded_page_numbers),
         "vettedExcludedPages": (vetted_excluded_page_numbers),
         "pageCounts": page_counts,
+        "hasContentRedactions": has_content_redactions,
         "decisionTypes": sorted({decision.kind for decision in request.decisions}),
         "exportPath": (
             redaction_run_redacted_pdf_key(document_id, run_id, claim_id)

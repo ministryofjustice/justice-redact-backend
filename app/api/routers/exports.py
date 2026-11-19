@@ -165,6 +165,17 @@ async def get_document_export(
         ),
         "pageCount": original_page_count,
         "pageCounts": page_counts,
+        **(
+            {
+                "hasContentRedactions":
+                    redaction_run["hasContentRedactions"]
+            }
+            if isinstance(
+                redaction_run.get("hasContentRedactions"),
+                bool,
+            )
+            else {}
+        ),
     }
 
 
