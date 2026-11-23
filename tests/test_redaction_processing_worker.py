@@ -4,6 +4,16 @@ import pytest
 from app.workers import redaction_processing_worker as worker
 
 
+@pytest.fixture(autouse=True)
+def _prevent_real_s3_cleanup(monkeypatch):
+    """Never perform real AWS deletion from worker unit tests."""
+    monkeypatch.setattr(
+        worker,
+        "delete_s3_prefix",
+        lambda prefix: None,
+    )
+
+
 class FakeThread:
     def __init__(self, *args, **kwargs):
         pass
@@ -304,7 +314,7 @@ def test_redaction_worker_processes_snapshot_and_completes_run(
     assert failed_runs == []
 
 
-def test_cancelled_redaction_processing_cleans_only_run_prefix(
+def test_cancelled_redaction_processing_does_not_delete_shared_run_prefix(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -340,6 +350,7 @@ def test_cancelled_redaction_processing_cleans_only_run_prefix(
         worker,
         "delete_s3_prefix",
         lambda prefix: deleted_prefixes.append(prefix),
+        raising=False,
     )
 
     deleted_messages = []
@@ -360,7 +371,7 @@ def test_cancelled_redaction_processing_cleans_only_run_prefix(
 
     worker.process_sqs_message(_message())
 
-    assert deleted_prefixes == ["documents/document-123/redaction-runs/run-123/"]
+    assert deleted_prefixes == []
     assert deleted_messages == ["receipt-123"]
     assert failed_runs == []
 
@@ -440,4 +451,142 @@ def test_redaction_worker_failure_uses_sqs_receive_count_for_retry(
 
     # Do not acknowledge a genuine processing failure.
     # SQS must redeliver it or eventually move it to the DLQ.
+    assert deleted_messages == []
+
+
+def test_stale_worker_failure_cannot_delete_shared_run_prefix(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        worker,
+        "get_redaction_run",
+        lambda run_id: _run_state(),
+    )
+    monkeypatch.setattr(
+        worker,
+        "claim_redaction_run",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        worker.threading,
+        "Thread",
+        FakeThread,
+    )
+
+    def fail_processing(**kwargs):
+        raise RuntimeError("Stale processing attempt")
+
+    monkeypatch.setattr(
+        worker,
+        "apply_redactions_for_document",
+        fail_processing,
+    )
+
+    # False means this worker no longer owns the run.
+    monkeypatch.setattr(
+        worker,
+        "fail_redaction_run",
+        lambda **kwargs: False,
+    )
+
+    deleted_prefixes = []
+
+    monkeypatch.setattr(
+        worker,
+        "delete_s3_prefix",
+        lambda prefix: deleted_prefixes.append(prefix),
+        raising=False,
+    )
+
+    deleted_messages = []
+
+    monkeypatch.setattr(
+        worker,
+        "delete_redaction_processing_message",
+        lambda *, receipt_handle: (
+            deleted_messages.append(receipt_handle)
+        ),
+    )
+
+    worker.process_sqs_message(_message())
+
+    assert deleted_prefixes == []
+    assert deleted_messages == ["receipt-123"]
+
+
+def test_pdf_security_audit_failure_prevents_run_completion(
+    monkeypatch,
+):
+    from justice_redact.pdf_handler.apply.export_security_audit import (
+        PDFExportSecurityError,
+    )
+
+    monkeypatch.setattr(
+        worker,
+        "get_redaction_run",
+        lambda run_id: _run_state(),
+    )
+    monkeypatch.setattr(
+        worker,
+        "claim_redaction_run",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        worker.threading,
+        "Thread",
+        FakeThread,
+    )
+
+    def fail_security_audit(**kwargs):
+        raise PDFExportSecurityError(
+            "Saved PDF failed security audit"
+        )
+
+    monkeypatch.setattr(
+        worker,
+        "apply_redactions_for_document",
+        fail_security_audit,
+    )
+
+    failure_calls = []
+
+    def fail_run(**kwargs):
+        failure_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        worker,
+        "fail_redaction_run",
+        fail_run,
+    )
+
+    completion_calls = []
+
+    monkeypatch.setattr(
+        worker,
+        "complete_redaction_run",
+        lambda **kwargs: completion_calls.append(kwargs),
+    )
+
+    deleted_messages = []
+
+    monkeypatch.setattr(
+        worker,
+        "delete_redaction_processing_message",
+        lambda *, receipt_handle: (
+            deleted_messages.append(receipt_handle)
+        ),
+    )
+
+    with pytest.raises(
+        PDFExportSecurityError,
+        match="Saved PDF failed security audit",
+    ):
+        worker.process_sqs_message(_message())
+
+    assert len(failure_calls) == 1
+    assert failure_calls[0]["run_id"] == "run-123"
+    assert failure_calls[0]["terminal"] is False
+
+    assert completion_calls == []
     assert deleted_messages == []

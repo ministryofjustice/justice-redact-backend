@@ -52,6 +52,11 @@ class RedactionRun(Base):
         nullable=True,
     )
 
+    published_claim_id = Column(
+        String,
+        nullable=True,
+    )
+
     lease_expires_at = Column(
         DateTime(timezone=True),
         nullable=True,

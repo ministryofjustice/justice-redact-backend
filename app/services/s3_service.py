@@ -75,10 +75,17 @@ def delete_s3_prefix(prefix: str) -> None:
         if not objects:
             continue
 
-        s3_client.delete_objects(
+        result = s3_client.delete_objects(
             Bucket=_BUCKET,
             Delete={
                 "Objects": objects,
                 "Quiet": True,
             },
         )
+
+        # S3 can return HTTP 200 while reporting individual
+        # object deletion failures in the response.
+        if result is not None and result.get("Errors"):
+            raise RuntimeError(
+                "S3 prefix cleanup could not delete all listed objects"
+            )

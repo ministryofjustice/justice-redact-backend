@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import time
 
 from fastapi import HTTPException
@@ -312,10 +313,63 @@ def group_decisions_by_chunk(
     return grouped
 
 
+def has_applied_content_redactions(
+    *,
+    resolved_decisions: list[tuple],
+    excluded_page_numbers: list[int],
+) -> bool:
+    """
+    Report whether the redacted PDF has an applied content redaction.
+
+    Only explicit, successfully resolved vetter redactions on pages
+    retained in the redacted PDF qualify. AI suggestions, unresolved
+    operations and redactions on exempted/deleted pages do not.
+    """
+    excluded_pages = set(excluded_page_numbers)
+
+    for decision, resolved in resolved_decisions:
+        if (
+            resolved is not None
+            and decision.action == "redact"
+            and decision.source != "ai"
+            and decision.page_number not in excluded_pages
+        ):
+            return True
+
+    return False
+
+
 def apply_redactions_for_document(
     *,
     document_id: str,
     run_id: str,
+    claim_id: str,
+    request: ApplyRedactionsRequest,
+    is_redaction_active=lambda: True,
+    progress_callback: Callable[[int], None] | None = None,
+) -> dict:
+    """Process PDFs inside a private, automatically cleaned workspace."""
+    with TemporaryDirectory(
+        prefix=".jr-redaction-",
+        dir="/tmp",
+    ) as temporary_directory:
+        return _apply_redactions_for_document_in_workspace(
+            workspace=Path(temporary_directory),
+            document_id=document_id,
+            run_id=run_id,
+            claim_id=claim_id,
+            request=request,
+            is_redaction_active=is_redaction_active,
+            progress_callback=progress_callback,
+        )
+
+
+def _apply_redactions_for_document_in_workspace(
+    *,
+    workspace: Path,
+    document_id: str,
+    run_id: str,
+    claim_id: str,
     request: ApplyRedactionsRequest,
     is_redaction_active=lambda: True,
     progress_callback: Callable[[int], None] | None = None,
@@ -430,13 +484,13 @@ def apply_redactions_for_document(
         flush=True,
     )
 
-    pdf_path = Path("/tmp") / f"{document_id}-{run_id}.pdf"
+    pdf_path = workspace / "original.pdf"
 
-    redacted_output_path = Path("/tmp") / f"{document_id}-{run_id}-redacted.pdf"
+    redacted_output_path = workspace / "redacted.pdf"
 
-    vetted_output_path = Path("/tmp") / f"{document_id}-{run_id}-vetted.pdf"
+    vetted_output_path = workspace / "vetted.pdf"
 
-    exempt_output_path = Path("/tmp") / f"{document_id}-{run_id}-exempt.pdf"
+    exempt_output_path = workspace / "exempt.pdf"
 
     start = time.perf_counter()
 
@@ -678,6 +732,11 @@ def apply_redactions_for_document(
         set(exempt_page_numbers + deleted_page_numbers)
     )
 
+    has_content_redactions = has_applied_content_redactions(
+        resolved_decisions=resolved_decisions,
+        excluded_page_numbers=redacted_excluded_page_numbers,
+    )
+
     # Exempt pages are removed from the vetted copy because they are
     # exported separately. Deleted pages remain in the vetted copy.
     vetted_excluded_page_numbers = exempt_page_numbers
@@ -843,10 +902,7 @@ def apply_redactions_for_document(
 
     upload_file_to_s3(
         redacted_output_path,
-        redaction_run_redacted_pdf_key(
-            document_id,
-            run_id,
-        ),
+        redaction_run_redacted_pdf_key(document_id, run_id, claim_id),
     )
 
     completed_uploads += 1
@@ -873,10 +929,7 @@ def apply_redactions_for_document(
 
     upload_file_to_s3(
         vetted_output_path,
-        redaction_run_vetted_pdf_key(
-            document_id,
-            run_id,
-        ),
+        redaction_run_vetted_pdf_key(document_id, run_id, claim_id),
     )
 
     completed_uploads += 1
@@ -904,10 +957,7 @@ def apply_redactions_for_document(
 
         upload_file_to_s3(
             exempt_output_path,
-            redaction_run_exempt_pdf_key(
-                document_id,
-                run_id,
-            ),
+            redaction_run_exempt_pdf_key(document_id, run_id, claim_id),
         )
 
         completed_uploads += 1
@@ -948,24 +998,16 @@ def apply_redactions_for_document(
         "redactedExcludedPages": (redacted_excluded_page_numbers),
         "vettedExcludedPages": (vetted_excluded_page_numbers),
         "pageCounts": page_counts,
+        "hasContentRedactions": has_content_redactions,
         "decisionTypes": sorted({decision.kind for decision in request.decisions}),
         "exportPath": (
-            redaction_run_redacted_pdf_key(
-                document_id,
-                run_id,
-            )
+            redaction_run_redacted_pdf_key(document_id, run_id, claim_id)
         ),
         "vettedExportPath": (
-            redaction_run_vetted_pdf_key(
-                document_id,
-                run_id,
-            )
+            redaction_run_vetted_pdf_key(document_id, run_id, claim_id)
         ),
         "exemptExportPath": (
-            redaction_run_exempt_pdf_key(
-                document_id,
-                run_id,
-            )
+            redaction_run_exempt_pdf_key(document_id, run_id, claim_id)
             if exempt_page_numbers
             else None
         ),
