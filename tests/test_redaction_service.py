@@ -110,11 +110,19 @@ def test_apply_redactions_reports_progress_for_two_export_path(
 ):
     progress_updates = []
     upload_calls = []
+    typed_image_decision = SimpleNamespace(
+        kind="image",
+        page_number=1,
+        image_id="image-1",
+        source="manual",
+        action="redact",
+    )
 
     request = SimpleNamespace(
         decisions=[
             SimpleNamespace(
-                kind="image",
+                kind="image", pageNumber=1, imageId="image-1",
+                source="manual", action="redact",
             )
         ],
     )
@@ -146,16 +154,16 @@ def test_apply_redactions_reports_progress_for_two_export_path(
         "download_json_from_s3",
         lambda key: {
             "totalPages": 3,
-            "chunks": [],
+            "chunks": [
+                {"chunkIndex": 1, "pageStart": 1, "pageEnd": 3},
+            ],
         },
     )
 
     monkeypatch.setattr(
         redaction_service,
         "build_pdf_handler_decisions",
-        lambda **kwargs: [
-            SimpleNamespace(),
-        ],
+        lambda **kwargs: [typed_image_decision],
     )
 
     monkeypatch.setattr(
@@ -167,9 +175,31 @@ def test_apply_redactions_reports_progress_for_two_export_path(
     monkeypatch.setattr(
         redaction_service,
         "group_decisions_by_chunk",
-        lambda **kwargs: {},
+        lambda **kwargs: {1: [typed_image_decision]},
     )
 
+    monkeypatch.setattr(
+        redaction_service,
+        "Document",
+        SimpleNamespace(
+            model_validate=lambda payload: SimpleNamespace(
+                source_path=None
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        redaction_service,
+        "resolve_pdf_decisions_once",
+        lambda **kwargs: [
+            (
+                typed_image_decision,
+                SimpleNamespace(
+                    page_number=1,
+                    boxes=[object()],
+                ),
+            )
+        ],
+    )
     monkeypatch.setattr(
         redaction_service,
         "build_page_decisions",
@@ -263,6 +293,9 @@ def test_apply_redactions_reports_progress_for_three_export_path(
         decisions=[
             SimpleNamespace(
                 kind="page",
+                pageNumber=2,
+                action="exempt",
+                source="manual",
             )
         ],
     )
