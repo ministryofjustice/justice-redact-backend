@@ -1,7 +1,5 @@
 from fastapi import APIRouter
 
-from app.core.paths import UPLOAD_DIR
-
 router = APIRouter(tags=["health"])
 
 
@@ -9,5 +7,4 @@ router = APIRouter(tags=["health"])
 async def health_check():
     return {
         "status": "ok",
-        "uploadDirExists": UPLOAD_DIR.exists(),
     }

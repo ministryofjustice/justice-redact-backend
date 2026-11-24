@@ -1,35 +1,558 @@
 from fastapi import HTTPException
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import and_, case, or_, select, update
 
-DOCUMENT_STATUS_STORE: dict[str, dict] = {}
+from app.core.database import SessionLocal
+from app.models.document import Document
+from app.models.user import User
 
 
-def create_document_record(document_id: str, filename: str) -> dict:
+DOCUMENT_RESUME_LIFETIME = timedelta(days=30)
 
-    record = {
-        "documentId": document_id,
-        "filename": filename,
-        "status": "uploaded",
-        "subjectName": "",
-        "subjectPrisonNumber": "",
-        "otherPhrases": "",
+
+def _normalise_to_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+
+    return value.astimezone(timezone.utc)
+
+
+def document_to_dict(document: Document) -> dict:
+    return {
+        "documentId": document.document_id,
+        "filename": document.filename,
+        "status": document.status,
+        "currentRedactionRunId": document.current_redaction_run_id,
+        "documentType": document.document_type,
+        "warningReason": document.warning_reason,
+        "warningAcknowledgedAt": (
+            document.warning_acknowledged_at.isoformat()
+            if document.warning_acknowledged_at
+            else None
+        ),
+        "abandonedAt": (
+            document.abandoned_at.isoformat() if document.abandoned_at else None
+        ),
+        "processingJobId": document.processing_job_id,
+        "processingProgress": document.processing_progress,
+        "processingAttemptCount": document.processing_attempt_count,
+        "processingClaimId": document.processing_claim_id,
+        "processingLeaseExpiresAt": (
+            document.processing_lease_expires_at.isoformat()
+            if document.processing_lease_expires_at
+            else None
+        ),
+        "subjectName": document.subject_name,
+        "subjectPrisonNumber": document.subject_prison_number,
+        "otherPhrases": document.other_phrases,
+        "createdAt": document.created_at.isoformat() if document.created_at else None,
+        "updatedAt": document.updated_at.isoformat() if document.updated_at else None,
+        "processingStartedAt": (
+            document.processing_started_at.isoformat()
+            if document.processing_started_at
+            else None
+        ),
+        "processingCompletedAt": (
+            document.processing_completed_at.isoformat()
+            if document.processing_completed_at
+            else None
+        ),
+        "redactionStartedAt": (
+            document.redaction_started_at.isoformat()
+            if document.redaction_started_at
+            else None
+        ),
+        "redactionCompletedAt": (
+            document.redaction_completed_at.isoformat()
+            if document.redaction_completed_at
+            else None
+        ),
+        "errorMessage": document.error_message,
     }
 
-    DOCUMENT_STATUS_STORE[document_id] = record
 
-    return record
+def create_document_record(
+    document_id: str,
+    owner_user_id: str,
+    filename: str,
+    document_type: str,
+    warning_reason: str | None = None,
+) -> dict:
+    with SessionLocal() as session:
+        document = Document(
+            document_id=document_id,
+            owner_user_id=owner_user_id,
+            filename=filename,
+            status="uploaded",
+            document_type=document_type,
+            warning_reason=warning_reason,
+            subject_name="",
+            subject_prison_number="",
+            other_phrases="",
+        )
+
+        session.add(document)
+        session.commit()
+        session.refresh(document)
+
+        return document_to_dict(document)
 
 
 def get_document(document_id: str) -> dict | None:
+    with SessionLocal() as session:
+        document = session.get(Document, document_id)
 
-    return DOCUMENT_STATUS_STORE.get(document_id)
+        if document is None:
+            return None
+
+        return document_to_dict(document)
 
 
 def get_document_or_404(document_id: str) -> dict:
-
     document = get_document(document_id)
 
     if not document:
-
         raise HTTPException(status_code=404, detail="Document not found")
 
     return document
+
+
+def get_document_for_user_or_404(
+    document_id: str,
+    user_id: str,
+) -> dict:
+    """
+    Return a document only when it belongs to the authenticated user.
+
+    A document owned by another user is deliberately indistinguishable
+    from a document that does not exist. This prevents document-ID
+    enumeration from revealing another user's records.
+    """
+
+    with SessionLocal() as session:
+        document = session.execute(
+            select(Document).where(
+                Document.document_id == document_id,
+                Document.owner_user_id == user_id,
+            )
+        ).scalar_one_or_none()
+
+        if document is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Document not found",
+            )
+
+        created_at = _normalise_to_utc(document.created_at)
+        expires_at = created_at + DOCUMENT_RESUME_LIFETIME
+
+        if datetime.now(timezone.utc) >= expires_at:
+            raise HTTPException(
+                status_code=410,
+                detail="Document link expired",
+            )
+
+        return document_to_dict(document)
+
+
+def get_pending_ready_notification(
+    document_id: str,
+) -> dict | None:
+    """
+    Return the document owner's email only when the document is ready for
+    review and its ready notification has not already been recorded as sent.
+    """
+
+    with SessionLocal() as session:
+        row = session.execute(
+            select(
+                User.email,
+                Document.filename,
+            )
+            .join(
+                Document,
+                Document.owner_user_id == User.user_id,
+            )
+            .where(
+                Document.document_id == document_id,
+                Document.status == "ready_for_review",
+                Document.ready_notification_sent_at.is_(None),
+            )
+        ).one_or_none()
+
+        if row is None:
+            return None
+
+        return {
+            "email": row.email,
+            "filename": row.filename,
+        }
+
+
+def mark_ready_notification_sent(
+    *,
+    document_id: str,
+    sent_at: datetime,
+) -> bool:
+    """
+    Record that the ready-for-review email has been sent.
+
+    The conditional update means an already-recorded notification is not
+    overwritten by a later worker retry.
+    """
+
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.status == "ready_for_review",
+                Document.ready_notification_sent_at.is_(None),
+            )
+            .values(
+                ready_notification_sent_at=sent_at,
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
+
+
+def update_document_record(
+    document_id: str,
+    *,
+    status: str | None = None,
+    processing_job_id: str | None = None,
+    processing_attempt_count: int | None = None,
+    processing_claim_id: str | None = None,
+    processing_lease_expires_at: datetime | None = None,
+    subject_name: str | None = None,
+    subject_prison_number: str | None = None,
+    other_phrases: str | None = None,
+    warning_reason: str | None = None,
+    warning_acknowledged_at: datetime | None = None,
+    abandoned_at: datetime | None = None,
+    processing_started_at: datetime | None = None,
+    processing_completed_at: datetime | None = None,
+    redaction_started_at: datetime | None = None,
+    redaction_completed_at: datetime | None = None,
+    error_message: str | None = None,
+    clear_error: bool = False,
+) -> dict:
+    with SessionLocal() as session:
+        document = session.get(Document, document_id)
+
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        if status is not None:
+            document.status = status
+
+        if processing_job_id is not None:
+            document.processing_job_id = processing_job_id
+
+        if processing_attempt_count is not None:
+            document.processing_attempt_count = processing_attempt_count
+
+        if processing_claim_id is not None:
+            document.processing_claim_id = processing_claim_id
+
+        if processing_lease_expires_at is not None:
+            document.processing_lease_expires_at = processing_lease_expires_at
+
+        if subject_name is not None:
+            document.subject_name = subject_name
+
+        if subject_prison_number is not None:
+            document.subject_prison_number = subject_prison_number
+
+        if other_phrases is not None:
+            document.other_phrases = other_phrases
+
+        if warning_reason is not None:
+            document.warning_reason = warning_reason
+
+        if warning_acknowledged_at is not None:
+            document.warning_acknowledged_at = warning_acknowledged_at
+
+        if abandoned_at is not None:
+            document.abandoned_at = abandoned_at
+
+        if processing_started_at is not None:
+            document.processing_started_at = processing_started_at
+
+        if processing_completed_at is not None:
+            document.processing_completed_at = processing_completed_at
+
+        if redaction_started_at is not None:
+            document.redaction_started_at = redaction_started_at
+
+        if redaction_completed_at is not None:
+            document.redaction_completed_at = redaction_completed_at
+
+        if error_message is not None:
+            document.error_message = error_message
+
+        if clear_error:
+            document.error_message = None
+
+        session.commit()
+        session.refresh(document)
+
+        return document_to_dict(document)
+
+
+def try_claim_document_processing(
+    *,
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+    attempt_count: int,
+    lease_expires_at: datetime,
+) -> bool:
+    now = datetime.now(timezone.utc)
+
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.processing_job_id == job_id,
+                or_(
+                    Document.status.in_(["enqueueing", "queued", "retrying"]),
+                    and_(
+                        Document.status == "processing",
+                        or_(
+                            Document.processing_lease_expires_at.is_(None),
+                            Document.processing_lease_expires_at <= now,
+                        ),
+                    ),
+                ),
+            )
+            .values(
+                status="processing",
+                processing_claim_id=claim_id,
+                processing_attempt_count=attempt_count,
+                processing_lease_expires_at=lease_expires_at,
+                processing_started_at=now,
+                processing_completed_at=None,
+                error_message=None,
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
+
+
+def is_document_processing_owner(
+    *,
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+) -> bool:
+    with SessionLocal() as session:
+        document = session.get(Document, document_id)
+
+        if document is None:
+            return False
+
+        return (
+            document.status == "processing"
+            and document.processing_job_id == job_id
+            and document.processing_claim_id == claim_id
+        )
+
+
+def renew_document_processing_lease(
+    *,
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+    lease_expires_at: datetime,
+) -> bool:
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.processing_job_id == job_id,
+                Document.processing_claim_id == claim_id,
+                Document.status == "processing",
+            )
+            .values(
+                processing_lease_expires_at=lease_expires_at,
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
+
+
+def update_document_processing_progress(
+    *,
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+    progress: int,
+) -> bool:
+    if progress < 0 or progress > 99:
+        raise ValueError("Processing progress must be between 0 and 99")
+
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.processing_job_id == job_id,
+                Document.processing_claim_id == claim_id,
+                Document.status == "processing",
+            )
+            .values(
+                processing_progress=case(
+                    (
+                        Document.processing_progress < progress,
+                        progress,
+                    ),
+                    else_=Document.processing_progress,
+                ),
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
+
+
+def fail_document_processing_attempt(
+    *,
+    document_id: str,
+    job_id: str,
+    claim_id: str,
+    terminal: bool,
+) -> bool:
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.processing_job_id == job_id,
+                Document.processing_claim_id == claim_id,
+                Document.status == "processing",
+            )
+            .values(
+                status="failed" if terminal else "retrying",
+                processing_completed_at=(
+                    datetime.now(timezone.utc) if terminal else None
+                ),
+                processing_claim_id=None,
+                processing_lease_expires_at=None,
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
+
+
+def mark_document_processing_queued(
+    *,
+    document_id: str,
+    job_id: str,
+) -> bool:
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.processing_job_id == job_id,
+                Document.status == "enqueueing",
+            )
+            .values(
+                status="queued",
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
+
+
+def try_start_document_processing_enqueue(
+    *,
+    document_id: str,
+    job_id: str,
+    subject_name: str,
+    subject_prison_number: str,
+    other_phrases: str,
+) -> bool:
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.status.in_(
+                    [
+                        "uploaded",
+                        "enqueue_failed",
+                        "failed",
+                    ]
+                ),
+            )
+            .values(
+                status="enqueueing",
+                processing_job_id=job_id,
+                processing_progress=0,
+                processing_attempt_count=0,
+                processing_claim_id=None,
+                processing_lease_expires_at=None,
+                processing_started_at=None,
+                processing_completed_at=None,
+                subject_name=subject_name,
+                subject_prison_number=subject_prison_number,
+                other_phrases=other_phrases,
+                error_message=None,
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1
+
+
+def try_abandon_document_processing(
+    *,
+    document_id: str,
+) -> bool:
+    now = datetime.now(timezone.utc)
+
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Document)
+            .where(
+                Document.document_id == document_id,
+                Document.status.in_(
+                    [
+                        "uploaded",
+                        "enqueue_failed",
+                        "enqueueing",
+                        "queued",
+                        "processing",
+                        "retrying",
+                        "failed",
+                    ]
+                ),
+            )
+            .values(
+                status="abandoned",
+                abandoned_at=now,
+                processing_claim_id=None,
+                processing_lease_expires_at=None,
+            )
+        )
+
+        session.commit()
+
+        return result.rowcount == 1

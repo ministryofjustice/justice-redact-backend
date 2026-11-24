@@ -1,0 +1,165 @@
+name: 'Integration QA (PR Preview)'
+
+on:
+  pull_request:
+    types:
+      - converted_to_draft
+      - opened
+      - ready_for_review
+      - reopened
+      - synchronize
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  # ==========================================
+  # JOB 1: Check if PR is a Draft
+  # ==========================================
+  eligibility:
+    name: Determine eligibility
+    if: github.event.pull_request.base.ref == 'dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      eligible: ${{ steps.eligible.outputs.result }}
+    steps:
+      - name: Get draft PRs
+        id: get-draft-prs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo 'result<<EOF'
+            gh pr list --repo ministryofjustice/justice-redact-backend --draft --state open --json number || echo '[]'
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify PR status
+        id: eligible
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const raw = `${{ steps.get-draft-prs.outputs.result }}`.trim() || '[]';
+            const draftPRs = JSON.parse(raw).map(pr => pr.number);
+            return !draftPRs.includes(${{ github.event.pull_request.number }});
+
+  # ==========================================
+  # JOB 2: Build & Deploy Backend to Dev (Only if Ready for Review)
+  # ==========================================
+  ecr_and_deploy_qa:
+    name: Build & Deploy PR to Dev
+    needs: [eligibility]
+    if: ${{ needs.eligibility.outputs.eligible == 'true' }}
+    runs-on: ubuntu-latest
+    environment: dev
+
+    env:
+      KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
+
+    steps:
+      # 1. Checkout GitHub repository
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # 2. Configure AWS credentials using OIDC for Dev
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@0d04879d366c9959065c153479c620d35e5c4097 # v3
+        with:
+          role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
+          aws-region: eu-west-2
+
+      # 3. Log into container registry
+      - name: Log into ECR
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
+        id: login-ecr
+      
+      # 4. Obtain short-lived GitHub token for justice-redact private dependencies
+      - name: Obtain Octo STS Token
+        uses: octo-sts/action@6177b4481c00308b3839969c3eca88c96a91775f
+        id: octo_sts
+        with:
+          scope: moj-analytical-services/justice-redact
+          identity: ministryofjustice-justice-redact-backend
+
+      # 5. Build and push Docker image with QA commit tag
+      - name: Build & Push to ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: justice-redact/justice-redact-dev
+          IMAGE_TAG: qa-${{ github.sha }}
+          GITHUB_TOKEN: ${{ steps.octo_sts.outputs.token }}
+        run: |
+          DOCKER_BUILDKIT=1 docker build \
+            --secret id=github_token,env=GITHUB_TOKEN \
+            -t $REGISTRY/$REPOSITORY:python-$IMAGE_TAG .
+
+          docker push $REGISTRY/$REPOSITORY:python-$IMAGE_TAG
+
+      # 6. Generate Kubernetes manifests using template folder
+      - name: Generate Kubernetes manifests
+        run: |
+          sudo apt-get update && sudo apt-get install -y gettext
+          mkdir -p k8s/app
+
+          export TEAM_NAME=justice-redact
+          export ENVIRONMENT="dev"
+          export NAMESPACE="${KUBE_NAMESPACE}"
+          export IMAGE="${REGISTRY}/${REPOSITORY}:python-${IMAGE_TAG}"
+          export SERVICE_ACCOUNT="justice-redact-dev"
+          export INGRESS_CLASS="default-non-prod"
+          export MIGRATION_ID="qa-${GITHUB_SHA:0:12}-${GITHUB_RUN_ATTEMPT}"
+
+          envsubst < deployments/templates/deployment.yml > k8s/app/deployment.yml
+          envsubst < deployments/templates/worker-deployment.yml > k8s/app/worker-deployment.yml
+          envsubst < deployments/templates/service.yml > k8s/app/service.yml
+          envsubst < deployments/templates/ingress.yml > k8s/app/ingress.yml
+          envsubst < deployments/templates/migration-job.yml > k8s/migration-job.yml
+          envsubst < deployments/templates/hpa.yml > k8s/app/hpa.yml
+          envsubst < deployments/templates/worker-hpa.yml > k8s/app/worker-hpa.yml
+          envsubst < deployments/templates/redaction-worker-deployment.yml > k8s/app/redaction-worker-deployment.yml
+          envsubst < deployments/templates/redaction-worker-hpa.yml > k8s/app/redaction-worker-hpa.yml
+
+  
+          envsubst '$NAMESPACE' < deployments/templates/fluent-bit-configmap.yml > k8s/app/fluent-bit-configmap.yml
+          envsubst '$NAMESPACE' < deployments/templates/worker-fluent-bit-configmap.yml > k8s/app/worker-fluent-bit-configmap.yml
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: justice-redact/justice-redact-dev
+          IMAGE_TAG: qa-${{ github.sha }}
+          KUBE_NAMESPACE: ${{ secrets.KUBE_NAMESPACE }}
+
+      # 7. Authenticate to the cluster
+      - name: Authenticate to the cluster
+        env:
+          KUBE_CERT: ${{ secrets.KUBE_CERT }}
+          KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
+          KUBE_CLUSTER: ${{ secrets.KUBE_CLUSTER }}
+        run: |
+          echo "${KUBE_CERT}" > ca.crt
+          kubectl config set-cluster ${KUBE_CLUSTER} --certificate-authority=./ca.crt --server=https://${KUBE_CLUSTER}
+          kubectl config set-credentials deploy-user --token=${KUBE_TOKEN}
+          kubectl config set-context ${KUBE_CLUSTER} --cluster=${KUBE_CLUSTER} --user=deploy-user --namespace=${KUBE_NAMESPACE}
+          kubectl config use-context ${KUBE_CLUSTER}
+
+      # 8. Apply migrations once and wait before rolling the application forward
+      - name: Run database migrations
+        run: |
+          kubectl apply --filename=k8s/migration-job.yml --namespace=${KUBE_NAMESPACE}
+          kubectl wait \
+            --for=condition=complete \
+            --timeout=10m \
+            --filename=k8s/migration-job.yml \
+            --namespace=${KUBE_NAMESPACE}
+
+      # 9. Deploy to Kubernetes
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply --filename=k8s/app/ --namespace=${KUBE_NAMESPACE}

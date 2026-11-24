@@ -10,7 +10,6 @@ venv/
 
 # Environment variables
 .env
-.env.*
 
 # OS / editor files
 .DS_Store
