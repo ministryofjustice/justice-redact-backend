@@ -1,3 +1,7 @@
+from app.services.review_image_numbering import (
+    assign_review_image_numbers,
+    count_review_images,
+)
 from app.services.review_result_store import get_review_result
 from app.services.s3_keys import (
     document_review_chunk_key,
@@ -84,19 +88,108 @@ def _get_manifest_chunks(
     )
 
 
+def _review_chunk_key(
+    document_id: str,
+    chunk_index: int,
+    job_id: str | None,
+    claim_id: str | None,
+) -> str:
+    if job_id is None:
+        return document_review_chunk_key(
+            document_id,
+            chunk_index,
+        )
+
+    if claim_id is None:
+        return processing_review_chunk_key(
+            document_id,
+            job_id,
+            chunk_index,
+        )
+
+    return processing_claim_review_chunk_key(
+        document_id,
+        job_id,
+        claim_id,
+        chunk_index,
+    )
+
+
+def _valid_review_pages(review_chunk: dict) -> list[dict]:
+    return [
+        page
+        for page in review_chunk.get("pages", [])
+        if isinstance(page, dict)
+        and isinstance(page.get("pageNumber"), int)
+    ]
+
+
+def _has_unnumbered_images(pages: list[dict]) -> bool:
+    return any(
+        type(image.get("imageNumber")) is not int
+        or image["imageNumber"] < 1
+        for page in pages
+        for image in page.get("images", [])
+    )
+
+
 def get_review_pages(
     *,
     document_id: str,
     page_start: int,
     page_end: int,
 ) -> list[dict]:
-    """
-    Load only review chunks overlapping the requested page range.
+    """Load the requested pages with stable document-wide image numbers.
+
+    Newly processed documents require only overlapping review chunks.
+
+    For legacy chunks missing image numbers, count preceding images
+    using manifest metadata where available, or read preceding review
+    chunks as needed. Retain only counts, not preceding page contents.
     """
     pages: list[dict] = []
     chunks, job_id, claim_id = _get_manifest_chunks(document_id)
 
-    for chunk in chunks:
+    image_counts: dict[int, int] = {}
+
+    def load_chunk(chunk_index: int) -> list[dict]:
+        chunk_key = _review_chunk_key(
+            document_id,
+            chunk_index,
+            job_id,
+            claim_id,
+        )
+
+        return _valid_review_pages(
+            download_json_from_s3(chunk_key)
+        )
+
+    def count_chunk_images(chunk: dict) -> int:
+        chunk_index = chunk.get("chunkIndex")
+
+        if not isinstance(chunk_index, int):
+            return 0
+
+        if chunk_index in image_counts:
+            return image_counts[chunk_index]
+
+        manifest_count = chunk.get("imageCount")
+
+        if (
+            type(manifest_count) is int
+            and manifest_count >= 0
+        ):
+            count = manifest_count
+        else:
+            count = count_review_images(
+                load_chunk(chunk_index)
+            )
+
+        image_counts[chunk_index] = count
+
+        return count
+
+    for position, chunk in enumerate(chunks):
         chunk_index = chunk.get("chunkIndex")
         chunk_page_start = chunk.get("pageStart")
         chunk_page_end = chunk.get("pageEnd")
@@ -116,35 +209,31 @@ def get_review_pages(
         if chunk_page_start > page_end:
             continue
 
-        if job_id is None:
-            chunk_key = document_review_chunk_key(
-                document_id,
-                chunk_index,
+        chunk_pages = load_chunk(chunk_index)
+
+        image_counts[chunk_index] = count_review_images(
+            chunk_pages
+        )
+
+        if _has_unnumbered_images(chunk_pages):
+            offset = chunk.get("imageNumberOffset")
+
+            if type(offset) is not int or offset < 0:
+                offset = sum(
+                    count_chunk_images(previous)
+                    for previous in chunks[:position]
+                )
+
+            assign_review_image_numbers(
+                chunk_pages,
+                previous_count=offset,
             )
-        elif claim_id is None:
-            chunk_key = processing_review_chunk_key(
-                document_id,
-                job_id,
-                chunk_index,
-            )
-        else:
-            chunk_key = processing_claim_review_chunk_key(
-                document_id,
-                job_id,
-                claim_id,
-                chunk_index,
-            )
 
-        review_chunk = download_json_from_s3(chunk_key)
-
-        for page in review_chunk.get("pages", []):
-            page_number = page.get("pageNumber")
-
-            if not isinstance(page_number, int):
-                continue
-
-            if page_start <= page_number <= page_end:
-                pages.append(page)
+        pages.extend(
+            page
+            for page in chunk_pages
+            if page_start <= page["pageNumber"] <= page_end
+        )
 
     return sorted(
         pages,

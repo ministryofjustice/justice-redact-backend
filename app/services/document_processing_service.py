@@ -14,6 +14,9 @@ from app.services.document_store import (
 from app.services.review_result_store import (
     publish_review_result_if_processing_owner,
 )
+from app.services.review_image_numbering import (
+    assign_review_image_numbers,
+)
 from app.services.s3_keys import (
     processing_claim_geometry_chunk_key,
     processing_claim_geometry_manifest_key,
@@ -588,6 +591,7 @@ def process_document_pipeline(
         )
 
         preview_count = 0
+        total_images = 0
 
         for chunk in chunks:
             assert_processing_active(is_processing_active)
@@ -713,6 +717,19 @@ def process_document_pipeline(
             )
 
             start = time.perf_counter()
+
+            # Number every extracted image before preview generation.
+            # Missing image previews must not change subsequent ordinals.
+            chunk["imageNumberOffset"] = total_images
+
+            total_images = assign_review_image_numbers(
+                chunk_result.get("pages", []),
+                previous_count=total_images,
+            )
+
+            chunk["imageCount"] = (
+                total_images - chunk["imageNumberOffset"]
+            )
 
             for page in chunk_result.get(
                 "pages",
@@ -886,6 +903,7 @@ def process_document_pipeline(
         manifest = {
             "chunkSize": PDF_PROCESSING_CHUNK_SIZE,
             "totalPages": page_count,
+            "totalImages": total_images,
             "chunks": chunks,
         }
 
