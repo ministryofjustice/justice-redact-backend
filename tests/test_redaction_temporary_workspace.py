@@ -2,7 +2,6 @@
 import stat
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +9,12 @@ from justice_redact.pdf_handler.apply.export_security_audit import (
     PDFExportSecurityError,
 )
 
+from app.models.redaction_models import (
+    ApplyRedactionsRequest,
+    PageDecision,
+    TextRedactionDecision,
+)
+from app.services.redaction_integrity import RedactionIntegrityError
 from app.services import redaction_service
 
 
@@ -25,6 +30,7 @@ from app.services import redaction_service
         "upload_redacted",
         "upload_vetted",
         "upload_exempt",
+        "integrity_conversion",
     ],
 )
 def test_private_pdf_workspace_is_cleaned(
@@ -102,22 +108,7 @@ def test_private_pdf_workspace_is_cleaned(
         },
     )
 
-    monkeypatch.setattr(
-        redaction_service,
-        "build_pdf_handler_decisions",
-        lambda **kwargs: [
-            SimpleNamespace(
-                kind="text",
-                source="manual",
-            )
-        ],
-    )
 
-    monkeypatch.setattr(
-        redaction_service,
-        "group_decisions_by_chunk",
-        lambda **kwargs: {},
-    )
 
     monkeypatch.setattr(
         redaction_service,
@@ -130,6 +121,12 @@ def test_private_pdf_workspace_is_cleaned(
 
     def mock_exporter(kind):
         def generate(**kwargs):
+            if failure_stage == "integrity_conversion":
+                pytest.fail(
+                    "PDF generation must not start after "
+                    "a redaction integrity failure"
+                )
+
             output = Path(kwargs["output_path"])
 
             assert output.parent == workspaces[0]
@@ -199,21 +196,59 @@ def test_private_pdf_workspace_is_cleaned(
                 )
             )
 
+    if failure_stage == "integrity_conversion":
+        monkeypatch.setattr(
+            redaction_service,
+            "build_pdf_handler_decisions",
+            lambda **kwargs: [],
+        )
+
     def run():
         return redaction_service.apply_redactions_for_document(
             document_id="document-123",
             run_id="run-123",
             claim_id="claim-123",
-            request=SimpleNamespace(
-                decisions=[
-                    SimpleNamespace(kind="text")
-                ],
+            request=ApplyRedactionsRequest(
+                documentId="document-123",
+                decisions=(
+                    [
+                        TextRedactionDecision(
+                            kind="text",
+                            pageNumber=1,
+                            itemId="synthetic-item",
+                            start=0,
+                            end=4,
+                            text="FAKE",
+                            action="redact",
+                            source="manual",
+                        )
+                    ]
+                    if failure_stage == "integrity_conversion"
+                    else [
+                        PageDecision(
+                            kind="page",
+                            pageNumber=1,
+                            action="exempt",
+                            source="manual",
+                        )
+                    ]
+                ),
+                expectedRevision=0,
             ),
             is_redaction_active=lambda: True,
             progress_callback=progress,
         )
 
-    if failure_stage is None:
+    if failure_stage == "integrity_conversion":
+        with pytest.raises(
+            RedactionIntegrityError,
+            match="MANUAL_DECISION_NOT_CONVERTED",
+        ):
+            run()
+
+        assert uploaded_keys == []
+
+    elif failure_stage is None:
         result = run()
 
         assert len(uploaded_keys) == 3

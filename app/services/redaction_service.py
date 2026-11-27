@@ -21,9 +21,17 @@ from justice_redact.pdf_handler.resolution.resolve_any import (
     resolve_pdf_decisions_once,
 )
 
+from app.services.redaction_integrity import (
+    assert_manual_conversion_complete,
+    assert_manual_chunk_coverage,
+    assert_manual_resolution_complete,
+    assert_page_decisions_valid,
+    RedactionIntegrityError,
+)
 from app.models.redaction_models import (
     ApplyRedactionsRequest,
     ImageRedactionDecision,
+    ImageAreaRedactionDecision,
     PageDecision,
     TableRedactionDecision,
     TextRedactionDecision,
@@ -155,6 +163,40 @@ def build_pdf_handler_decisions(
                     action=decision.action,
                 )
             )
+            continue
+
+        if isinstance(decision, ImageAreaRedactionDecision):
+            required_fields = {"rect", "area_id"}
+
+            if not required_fields.issubset(
+                ImageRegionDecision.model_fields
+            ):
+                raise RedactionIntegrityError(
+                    "IMAGE_AREA_PDF_HANDLER_UNSUPPORTED: "
+                    "Installed Python package does not support "
+                    "partial-image redactions"
+                )
+
+            typed_decision = ImageRegionDecision(
+                document_id=document_id,
+                page_number=decision.pageNumber,
+                image_id=decision.imageId,
+                source=decision.source,
+                action=decision.action,
+                rect=decision.rect.model_dump(),
+                area_id=decision.areaId,
+            )
+
+            if (
+                typed_decision.rect is None
+                or typed_decision.area_id != decision.areaId
+            ):
+                raise RedactionIntegrityError(
+                    "IMAGE_AREA_CONVERSION_MISMATCH: "
+                    "Partial-image geometry was not preserved"
+                )
+
+            typed_decisions.append(typed_decision)
             continue
 
     return typed_decisions
@@ -544,6 +586,13 @@ def _apply_redactions_for_document_in_workspace(
         document_id=document_id,
         decisions=request.decisions,
     )
+    assert_manual_conversion_complete(
+        request_decisions=request.decisions,
+        converted_decisions=typed_decisions,
+        document_id=document_id,
+        run_id=run_id,
+        claim_id=claim_id,
+    )
 
     print(
         f"[REDACTION_TIMING] "
@@ -565,6 +614,13 @@ def _apply_redactions_for_document_in_workspace(
     decisions_by_chunk = group_decisions_by_chunk(
         manifest=manifest,
         typed_decisions=all_pdf_decisions,
+    )
+    assert_manual_chunk_coverage(
+        requested_decisions=typed_decisions,
+        decisions_by_chunk=decisions_by_chunk,
+        document_id=document_id,
+        run_id=run_id,
+        claim_id=claim_id,
     )
 
     report_progress(
@@ -660,6 +716,13 @@ def _apply_redactions_for_document_in_workspace(
             REDACTION_PROGRESS_RESOLUTION_COMPLETE,
         )
 
+    assert_manual_resolution_complete(
+        requested_decisions=typed_decisions,
+        resolved_decisions=resolved_decisions,
+        document_id=document_id,
+        run_id=run_id,
+        claim_id=claim_id,
+    )
     unresolved_decision_count = len(typed_decisions) - len(resolved_decisions)
 
     unresolved_ai_count = len(ai_decisions) - len(resolved_ai_suggestions)
@@ -703,6 +766,14 @@ def _apply_redactions_for_document_in_workspace(
     deleted_page_numbers = page_decisions["deleted_page_numbers"]
 
     original_page_count = manifest.get("totalPages") or 0
+
+    assert_page_decisions_valid(
+        request_decisions=request.decisions,
+        total_pages=original_page_count,
+        document_id=document_id,
+        run_id=run_id,
+        claim_id=claim_id,
+    )
 
     valid_exempt_page_numbers = [
         page_number
