@@ -5,7 +5,7 @@ on:
     branches:
       - dev
       - staging
-      - prod
+      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,7 +23,7 @@ jobs:
             echo "env_name=dev" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref_name }}" = "staging" ]; then
             echo "env_name=staging" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" = "prod" ]; then
+          elif [ "${{ github.ref_name }}" = "main" ]; then
             echo "env_name=prod" >> $GITHUB_OUTPUT
           else
             echo "env_name=dev" >> $GITHUB_OUTPUT
@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Configure AWS credentials
-        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'prod')
+        if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
         uses: aws-actions/configure-aws-credentials@0d04879d366c9959065c153479c620d35e5c4097 # v3
         with:
           role-to-assume: ${{ secrets.ECR_ROLE_TO_ASSUME }}
@@ -95,8 +95,10 @@ jobs:
 
           if [ "${ENVIRONMENT}" = "prod" ]; then
             export INGRESS_CLASS="default"
+            export SERVICE_ACCOUNT="justice-redact-production"
           else
             export INGRESS_CLASS="default-non-prod"
+            export SERVICE_ACCOUNT="justice-redact-${ENVIRONMENT}"
           fi
 
           envsubst < deployments/templates/deployment.yml > k8s/app/deployment.yml
